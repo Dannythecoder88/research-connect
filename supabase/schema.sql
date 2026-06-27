@@ -70,6 +70,7 @@ CREATE TABLE public.researcher_profiles (
   research_areas research_category[] DEFAULT '{}',
   location TEXT,
   profile_image_url TEXT,
+  profile_completion INTEGER DEFAULT 0,
   verification_status verification_status NOT NULL DEFAULT 'pending',
   verified_at TIMESTAMPTZ,
   verified_by UUID REFERENCES public.users(id),
@@ -425,14 +426,64 @@ CREATE POLICY "Profile images are public" ON storage.objects
 -- Function to handle new user registration
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  user_role_val user_role;
+  full_name_val TEXT;
+  first_name_val TEXT;
+  last_name_val TEXT;
 BEGIN
-  INSERT INTO public.users (id, email, full_name, role)
-  VALUES (
-    NEW.id,
-    NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
-    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'student')
+  user_role_val := COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'student');
+
+  -- Build full name from metadata if possible
+  first_name_val := NEW.raw_user_meta_data->>'first_name';
+  last_name_val := NEW.raw_user_meta_data->>'last_name';
+  full_name_val := COALESCE(
+    NEW.raw_user_meta_data->>'full_name',
+    NULLIF(TRIM(CONCAT_WS(' ', first_name_val, last_name_val)), ''),
+    NEW.email
   );
+
+  INSERT INTO public.users (id, email, full_name, role)
+  VALUES (NEW.id, NEW.email, full_name_val, user_role_val);
+
+  -- Create student profile with signup data so it can be pre-filled on the profile page
+  IF user_role_val = 'student' THEN
+    INSERT INTO public.student_profiles (
+      user_id,
+      high_school,
+      graduation_year,
+      location,
+      phone
+    ) VALUES (
+      NEW.id,
+      NULLIF(NEW.raw_user_meta_data->>'high_school', ''),
+      NULLIF(NEW.raw_user_meta_data->>'grad_year', '')::INTEGER,
+      NULLIF(NEW.raw_user_meta_data->>'location', ''),
+      NULLIF(NEW.raw_user_meta_data->>'phone', '')
+    );
+  END IF;
+
+  -- Create researcher profile with signup data so it can be pre-filled on the profile page
+  IF user_role_val = 'researcher' THEN
+    INSERT INTO public.researcher_profiles (
+      user_id,
+      lab_name,
+      affiliation,
+      email,
+      website,
+      description,
+      lead_researcher
+    ) VALUES (
+      NEW.id,
+      COALESCE(NULLIF(NEW.raw_user_meta_data->>'lab_name', ''), full_name_val),
+      NULLIF(NEW.raw_user_meta_data->>'affiliation', ''),
+      NEW.email,
+      NULLIF(NEW.raw_user_meta_data->>'website', ''),
+      NULLIF(NEW.raw_user_meta_data->>'description', ''),
+      full_name_val
+    );
+  END IF;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -464,6 +515,54 @@ BEGIN
   RETURN completion;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Function to calculate researcher profile completion
+CREATE OR REPLACE FUNCTION calculate_researcher_profile_completion(profile_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+  completion INTEGER := 0;
+  profile RECORD;
+BEGIN
+  SELECT * INTO profile FROM public.researcher_profiles WHERE id = profile_id;
+
+  IF profile.lab_name IS NOT NULL AND profile.lab_name != '' THEN completion := completion + 20; END IF;
+  IF profile.affiliation IS NOT NULL AND profile.affiliation != '' THEN completion := completion + 15; END IF;
+  IF profile.lead_researcher IS NOT NULL AND profile.lead_researcher != '' THEN completion := completion + 10; END IF;
+  IF profile.email IS NOT NULL AND profile.email != '' THEN completion := completion + 10; END IF;
+  IF profile.website IS NOT NULL AND profile.website != '' THEN completion := completion + 5; END IF;
+  IF profile.description IS NOT NULL AND profile.description != '' THEN completion := completion + 20; END IF;
+  IF profile.location IS NOT NULL AND profile.location != '' THEN completion := completion + 10; END IF;
+  IF array_length(profile.research_areas, 1) > 0 THEN completion := completion + 10; END IF;
+
+  RETURN completion;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger function to keep student profile completion in sync
+CREATE OR REPLACE FUNCTION sync_student_profile_completion()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.profile_completion := calculate_profile_completion(NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger function to keep researcher profile completion in sync
+CREATE OR REPLACE FUNCTION sync_researcher_profile_completion()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.profile_completion := calculate_researcher_profile_completion(NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_student_profile_completion
+  BEFORE INSERT OR UPDATE ON public.student_profiles
+  FOR EACH ROW EXECUTE FUNCTION sync_student_profile_completion();
+
+CREATE TRIGGER update_researcher_profile_completion
+  BEFORE INSERT OR UPDATE ON public.researcher_profiles
+  FOR EACH ROW EXECUTE FUNCTION sync_researcher_profile_completion();
 
 -- Function to send notification on application status change
 CREATE OR REPLACE FUNCTION notify_application_status_change()

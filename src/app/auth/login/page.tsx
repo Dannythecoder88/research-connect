@@ -105,7 +105,7 @@ export default function LoginPage() {
                   placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-9 pr-10"
+                  className="pl-9 pr-10 [&::-ms-reveal]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                   required
                 />
                 <button
@@ -130,7 +130,7 @@ export default function LoginPage() {
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
-            <Link href="/auth/signup/student" className="font-medium text-primary hover:underline">
+            <Link href="/auth/signup" className="font-medium text-primary hover:underline">
               Sign up
             </Link>
           </p>

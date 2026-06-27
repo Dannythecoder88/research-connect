@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Building2,
   Mail,
@@ -11,20 +11,50 @@ import {
   Upload,
   Microscope,
   CheckCircle2,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { Navbar } from "@/components/navbar";
 import { PageTransition, FadeIn } from "@/components/motion";
 import { RESEARCH_CATEGORIES } from "@/lib/constants";
 
 export default function ResearcherProfilePage() {
+  const [labName, setLabName] = useState("");
+  const [affiliation, setAffiliation] = useState("");
+  const [leadResearcher, setLeadResearcher] = useState("");
+  const [email, setEmail] = useState("");
+  const [website, setWebsite] = useState("");
+  const [location, setLocation] = useState("");
+  const [description, setDescription] = useState("");
+  const [profileImageUrl, setProfileImageUrl] = useState("");
   const [selectedAreas, setSelectedAreas] = useState<Set<string>>(
     new Set()
   );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  // Real-time client-side profile completion calculation
+  const completionPercent = useMemo(() => {
+    let completion = 0;
+    if (labName.trim()) completion += 20;
+    if (affiliation.trim()) completion += 15;
+    if (leadResearcher.trim()) completion += 10;
+    if (email.trim()) completion += 10;
+    if (website.trim()) completion += 5;
+    if (description.trim()) completion += 20;
+    if (location.trim()) completion += 10;
+    if (selectedAreas.size > 0) completion += 10;
+    return completion;
+  }, [labName, affiliation, leadResearcher, email, website, description, location, selectedAreas]);
 
   const toggleArea = (id: string) => {
     setSelectedAreas((prev) => {
@@ -33,6 +63,127 @@ export default function ResearcherProfilePage() {
       else next.add(id);
       return next;
     });
+  };
+
+  useEffect(() => {
+    async function loadProfile() {
+      const supabase = createClient();
+      const {
+        data: { user: authUser },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !authUser) {
+        setLoading(false);
+        setError("You must be signed in to view your profile.");
+        return;
+      }
+
+      // Autofill from auth metadata
+      const meta = authUser.user_metadata || {};
+
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("id, email, full_name")
+        .eq("id", authUser.id)
+        .single();
+
+      if (userError) {
+        setLoading(false);
+        setError("Failed to load your account information.");
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("researcher_profiles")
+        .select("*")
+        .eq("user_id", authUser.id)
+        .single();
+
+      if (profile) {
+        setLabName(profile.lab_name || meta.lab_name || "");
+        setAffiliation(profile.affiliation || meta.affiliation || "");
+        setLeadResearcher(profile.lead_researcher || userData.full_name || meta.full_name || "");
+        setEmail(profile.email || userData.email || authUser.email || "");
+        setWebsite(profile.website || meta.website || "");
+        setLocation(profile.location || "");
+        setDescription(profile.description || meta.description || "");
+        setProfileImageUrl(profile.profile_image_url || "");
+        setSelectedAreas(new Set((profile.research_areas || []).map(String)));
+      } else {
+        // No profile row yet - autofill from signup metadata
+        setLabName(meta.lab_name || "");
+        setAffiliation(meta.affiliation || "");
+        setLeadResearcher(userData.full_name || meta.full_name || "");
+        setEmail(userData.email || authUser.email || "");
+        setWebsite(meta.website || "");
+        setDescription(meta.description || "");
+
+        if (profileError && profileError.code !== "PGRST116") {
+          setError("Failed to load your profile.");
+        }
+      }
+
+      setLoading(false);
+    }
+
+    loadProfile();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    const supabase = createClient();
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser) {
+      setSaving(false);
+      setError("You must be signed in to save your profile.");
+      return;
+    }
+
+    const { error: userUpdateError } = await supabase
+      .from("users")
+      .update({ full_name: leadResearcher || email })
+      .eq("id", authUser.id);
+
+    if (userUpdateError) {
+      setSaving(false);
+      setError("Failed to update your name. Please try again.");
+      return;
+    }
+
+    const profileData = {
+      user_id: authUser.id,
+      lab_name: labName || null,
+      affiliation: affiliation || null,
+      lead_researcher: leadResearcher || null,
+      email: email || null,
+      website: website || null,
+      description: description || null,
+      location: location || null,
+      profile_image_url: profileImageUrl || null,
+      research_areas: Array.from(selectedAreas),
+    };
+
+    const { error: saveError } = await supabase
+      .from("researcher_profiles")
+      .upsert(profileData, { onConflict: "user_id" })
+      .select("id, profile_completion")
+      .single();
+
+    setSaving(false);
+
+    if (saveError) {
+      setError("Failed to save your profile. Please try again.");
+      return;
+    }
+
+    setSuccess("Profile saved successfully.");
   };
 
   return (
@@ -52,11 +203,47 @@ export default function ResearcherProfilePage() {
                   Manage your lab&apos;s profile and attract talented students.
                 </p>
               </div>
-              <Button className="gap-2 bg-emerald hover:bg-emerald-light text-white">
-                <Save className="h-4 w-4" />
+              <Button className="gap-2 bg-emerald hover:bg-emerald-light text-white" onClick={handleSave} disabled={saving || loading}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save Profile
               </Button>
             </div>
+          </FadeIn>
+
+          {error && (
+            <FadeIn className="mb-6">
+              <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                <div>{error}</div>
+              </div>
+            </FadeIn>
+          )}
+
+          {success && (
+            <FadeIn className="mb-6">
+              <div className="flex items-start gap-3 rounded-lg border border-emerald/20 bg-emerald/10 p-4 text-sm text-emerald">
+                <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
+                <div>{success}</div>
+              </div>
+            </FadeIn>
+          )}
+
+          {/* Completion bar */}
+          <FadeIn delay={0.1} className="mb-8">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">Profile Completion</span>
+                  <span className="text-sm font-bold text-emerald">{completionPercent}%</span>
+                </div>
+                <Progress value={completionPercent} className="h-2" />
+                <p className="text-xs text-muted-foreground mt-2">
+                  {completionPercent === 100
+                    ? "Your profile is complete! Students can now discover your lab."
+                    : "Complete your profile to help students learn about your lab."}
+                </p>
+              </CardContent>
+            </Card>
           </FadeIn>
 
           <div className="space-y-6">
@@ -75,6 +262,9 @@ export default function ResearcherProfilePage() {
                     <Input
                       id="labName"
                       placeholder="Your lab or organization name"
+                      value={labName}
+                      onChange={(e) => setLabName(e.target.value)}
+                      disabled={loading}
                     />
                   </div>
 
@@ -84,6 +274,9 @@ export default function ResearcherProfilePage() {
                       <Input
                         id="affiliation"
                         placeholder="University or institution"
+                        value={affiliation}
+                        onChange={(e) => setAffiliation(e.target.value)}
+                        disabled={loading}
                       />
                     </div>
                     <div className="space-y-2">
@@ -94,6 +287,9 @@ export default function ResearcherProfilePage() {
                           id="leadResearcher"
                           placeholder="Lead researcher name"
                           className="pl-9"
+                          value={leadResearcher}
+                          onChange={(e) => setLeadResearcher(e.target.value)}
+                          disabled={loading}
                         />
                       </div>
                     </div>
@@ -109,6 +305,9 @@ export default function ResearcherProfilePage() {
                           type="email"
                           placeholder="contact@university.edu"
                           className="pl-9"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          disabled={loading}
                         />
                       </div>
                     </div>
@@ -121,6 +320,9 @@ export default function ResearcherProfilePage() {
                           type="url"
                           placeholder="https://lab.university.edu"
                           className="pl-9"
+                          value={website}
+                          onChange={(e) => setWebsite(e.target.value)}
+                          disabled={loading}
                         />
                       </div>
                     </div>
@@ -134,6 +336,9 @@ export default function ResearcherProfilePage() {
                         id="location"
                         placeholder="City, State"
                         className="pl-9"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -144,6 +349,9 @@ export default function ResearcherProfilePage() {
                       id="description"
                       placeholder="Describe your lab's research focus and mission..."
                       rows={4}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      disabled={loading}
                     />
                   </div>
                 </CardContent>
@@ -193,18 +401,20 @@ export default function ResearcherProfilePage() {
                     Lab Photo
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-emerald/30 transition-colors">
-                    <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">
-                      Upload a lab or team photo
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="profileImageUrl">Photo URL</Label>
+                    <Input
+                      id="profileImageUrl"
+                      type="url"
+                      placeholder="https://..."
+                      value={profileImageUrl}
+                      onChange={(e) => setProfileImageUrl(e.target.value)}
+                      disabled={loading}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Paste a link to a lab or team photo.
                     </p>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      PNG, JPG up to 2MB. Recommended 800x400.
-                    </p>
-                    <Button variant="outline" size="sm">
-                      Choose Image
-                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -212,8 +422,8 @@ export default function ResearcherProfilePage() {
 
             {/* Save */}
             <div className="flex justify-end pb-8">
-              <Button size="lg" className="gap-2 bg-emerald hover:bg-emerald-light text-white">
-                <Save className="h-4 w-4" />
+              <Button size="lg" className="gap-2 bg-emerald hover:bg-emerald-light text-white" onClick={handleSave} disabled={saving || loading}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save Profile
               </Button>
             </div>

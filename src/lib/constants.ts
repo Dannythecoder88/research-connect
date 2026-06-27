@@ -1,7 +1,7 @@
 // Research categories with icons and colors
 export const RESEARCH_CATEGORIES = [
   {
-    id: "cs-ai",
+    id: "cs_ai",
     name: "Computer Science & AI",
     icon: "Cpu",
     color: "from-blue-500 to-indigo-600",
@@ -36,7 +36,7 @@ export const RESEARCH_CATEGORIES = [
     description: "Climate science, ecology, sustainability, and conservation biology",
   },
   {
-    id: "social-sciences",
+    id: "social_sciences",
     name: "Social Sciences",
     icon: "Users",
     color: "from-rose-500 to-pink-600",

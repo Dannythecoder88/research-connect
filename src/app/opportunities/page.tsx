@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { Suspense, useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import {
   Search,
   Filter,
@@ -15,6 +17,7 @@ import {
   CheckCircle2,
   SlidersHorizontal,
   FlaskConical,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +35,8 @@ import {
   LOCATION_TYPES,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 // Listing type matching database schema
 type Listing = {
@@ -50,6 +55,15 @@ type Listing = {
 };
 
 export default function OpportunitiesPage() {
+  return (
+    <Suspense>
+      <OpportunitiesContent />
+    </Suspense>
+  );
+}
+
+function OpportunitiesContent() {
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [listings, setListings] = useState<Listing[]>([]);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -60,22 +74,63 @@ export default function OpportunitiesPage() {
   const [selectedCommitments, setSelectedCommitments] = useState<Set<string>>(new Set());
   const [selectedLocations, setSelectedLocations] = useState<Set<string>>(new Set());
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // TODO: Replace with real Supabase query
-  // useEffect(() => {
-  //   const fetchListings = async () => {
-  //     const supabase = createClient();
-  //     const { data } = await supabase
-  //       .from('research_listings')
-  //       .select('*, researcher_profiles(lab_name)')
-  //       .eq('status', 'active')
-  //       .order('posted_at', { ascending: false });
-  //     if (data) setListings(data);
-  //   };
-  //   fetchListings();
-  // }, []);
+  // Check auth state
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      setAuthLoading(false);
+    });
+  }, []);
+
+  // Initialize category filter from URL params (for smart category boxes)
+  useEffect(() => {
+    const categoryParam = searchParams.get("category");
+    if (categoryParam) {
+      setSelectedCategories(new Set([categoryParam]));
+    }
+  }, [searchParams]);
+
+  // Fetch listings from Supabase
+  useEffect(() => {
+    async function fetchListings() {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("research_listings")
+        .select("*, researcher_profiles(lab_name)")
+        .eq("status", "active")
+        .order("posted_at", { ascending: false });
+
+      if (data) {
+        const mapped: Listing[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          organization: item.researcher_profiles?.lab_name || "Unknown Lab",
+          category: item.category,
+          commitment: item.commitment,
+          hours: item.weekly_hours || "TBD",
+          location: item.location,
+          posted: new Date(item.posted_at).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
+          description: item.description,
+          responsibilities: item.responsibilities || [],
+          skills: item.required_skills || [],
+          researchArea: item.research_area || "",
+        }));
+        setListings(mapped);
+      }
+    }
+    fetchListings();
+  }, []);
 
   const toggleSaved = (id: string) => {
+    if (!user) return;
     setSavedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -85,6 +140,7 @@ export default function OpportunitiesPage() {
   };
 
   const handleApply = (id: string) => {
+    if (!user) return;
     setAppliedIds((prev) => new Set(prev).add(id));
     setShowApplySuccess(true);
     setTimeout(() => setShowApplySuccess(false), 3000);
@@ -129,6 +185,10 @@ export default function OpportunitiesPage() {
     COMMITMENT_TYPES.find((c) => c.id === id);
   const getLocation = (id: string) =>
     LOCATION_TYPES.find((l) => l.id === id);
+
+  // For unauthenticated users, show top 3 fully, blur the rest
+  const isGuest = !authLoading && !user;
+  const GUEST_VISIBLE_COUNT = 3;
 
   const FilterPanel = () => (
     <div className="space-y-6">
@@ -302,96 +362,136 @@ export default function OpportunitiesPage() {
               <ScrollArea className="h-[calc(100vh-12rem)]">
                 <div className="space-y-3 pr-2">
                   <AnimatePresence mode="popLayout">
-                    {filteredListings.map((listing) => (
-                      <motion.div
-                        key={listing.id}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        {/* Use div instead of nested buttons to avoid hydration error */}
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            setSelectedListing(listing);
-                            setMobileDetailOpen(true);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
+                    {filteredListings.map((listing, index) => {
+                      const isBlurred = isGuest && index >= GUEST_VISIBLE_COUNT;
+
+                      return (
+                        <motion.div
+                          key={listing.id}
+                          layout
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ duration: 0.2 }}
+                          className="relative"
+                        >
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (isGuest) {
+                                window.location.href = "/auth/signup";
+                                return;
+                              }
                               setSelectedListing(listing);
                               setMobileDetailOpen(true);
-                            }
-                          }}
-                          className={cn(
-                            "w-full text-left p-4 rounded-xl border transition-all cursor-pointer",
-                            selectedListing?.id === listing.id
-                              ? "border-primary bg-primary/5 shadow-sm"
-                              : "border-border bg-card hover:border-primary/30 hover:shadow-sm"
-                          )}
-                        >
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-sm truncate">
-                                {listing.title}
-                              </h3>
-                              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                                <Building2 className="h-3 w-3 flex-shrink-0" />
-                                <span className="truncate">{listing.organization}</span>
-                              </p>
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                if (isGuest) {
+                                  window.location.href = "/auth/signup";
+                                  return;
+                                }
+                                setSelectedListing(listing);
+                                setMobileDetailOpen(true);
+                              }
+                            }}
+                            className={cn(
+                              "w-full text-left p-4 rounded-xl border transition-all cursor-pointer",
+                              isBlurred && "blur-[6px] select-none pointer-events-none",
+                              selectedListing?.id === listing.id
+                                ? "border-primary bg-primary/5 shadow-sm"
+                                : "border-border bg-card hover:border-primary/30 hover:shadow-sm"
+                            )}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-sm truncate">
+                                  {listing.title}
+                                </h3>
+                                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                  <Building2 className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{listing.organization}</span>
+                                </p>
+                              </div>
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSaved(listing.id);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.stopPropagation();
+                                    toggleSaved(listing.id);
+                                  }
+                                }}
+                                className="text-muted-foreground hover:text-primary transition-colors p-1 cursor-pointer"
+                              >
+                                {savedIds.has(listing.id) ? (
+                                  <BookmarkCheck className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <Bookmark className="h-4 w-4" />
+                                )}
+                              </div>
                             </div>
+
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              <Badge
+                                variant="secondary"
+                                className={cn(
+                                  "text-[10px]",
+                                  getCommitment(listing.commitment)?.color
+                                )}
+                              >
+                                {getCommitment(listing.commitment)?.label}
+                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] bg-muted">
+                                <MapPin className="h-2.5 w-2.5 mr-0.5" />
+                                {getLocation(listing.location)?.label}
+                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] bg-muted">
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                {listing.hours} hrs
+                              </Badge>
+                            </div>
+
+                            <p className="text-[11px] text-muted-foreground mt-2">
+                              Posted {listing.posted}
+                            </p>
+                          </div>
+
+                          {/* Overlay for blurred cards to capture clicks */}
+                          {isBlurred && (
                             <div
                               role="button"
                               tabIndex={0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleSaved(listing.id);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.stopPropagation();
-                                  toggleSaved(listing.id);
-                                }
-                              }}
-                              className="text-muted-foreground hover:text-primary transition-colors p-1 cursor-pointer"
-                            >
-                              {savedIds.has(listing.id) ? (
-                                <BookmarkCheck className="h-4 w-4 text-primary" />
-                              ) : (
-                                <Bookmark className="h-4 w-4" />
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            <Badge
-                              variant="secondary"
-                              className={cn(
-                                "text-[10px]",
-                                getCommitment(listing.commitment)?.color
-                              )}
-                            >
-                              {getCommitment(listing.commitment)?.label}
-                            </Badge>
-                            <Badge variant="secondary" className="text-[10px] bg-muted">
-                              <MapPin className="h-2.5 w-2.5 mr-0.5" />
-                              {getLocation(listing.location)?.label}
-                            </Badge>
-                            <Badge variant="secondary" className="text-[10px] bg-muted">
-                              <Clock className="h-2.5 w-2.5 mr-0.5" />
-                              {listing.hours} hrs
-                            </Badge>
-                          </div>
-
-                          <p className="text-[11px] text-muted-foreground mt-2">
-                            Posted {listing.posted}
-                          </p>
-                        </div>
-                      </motion.div>
-                    ))}
+                              onClick={() => { window.location.href = "/auth/signup"; }}
+                              onKeyDown={(e) => { if (e.key === "Enter") window.location.href = "/auth/signup"; }}
+                              className="absolute inset-0 cursor-pointer z-10"
+                            />
+                          )}
+                        </motion.div>
+                      );
+                    })}
                   </AnimatePresence>
+
+                  {/* Guest sign-up prompt over blurred listings */}
+                  {isGuest && filteredListings.length > GUEST_VISIBLE_COUNT && (
+                    <div className="relative -mt-16 pt-20 pb-6 text-center bg-gradient-to-t from-background via-background/95 to-transparent">
+                      <Lock className="h-6 w-6 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">
+                        Sign up to unlock all positions
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-4 max-w-xs mx-auto">
+                        Sign up or log in for free to unlock access to dozens of local research positions.
+                      </p>
+                      <Button asChild size="sm">
+                        <Link href="/auth/signup">Create Free Account</Link>
+                      </Button>
+                    </div>
+                  )}
 
                   {filteredListings.length === 0 && (
                     <div className="text-center py-16">

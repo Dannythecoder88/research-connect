@@ -206,7 +206,7 @@ export default function StudentSignUpPage() {
                       id="password"
                       type={showPassword ? "text" : "password"}
                       placeholder="Create a strong password"
-                      className="pl-9 pr-10"
+                      className="pl-9 pr-10 [&::-ms-reveal]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                       required
                       minLength={6}
                       value={password}
@@ -221,6 +221,13 @@ export default function StudentSignUpPage() {
                     </button>
                   </div>
                 </div>
+
+                <p className="text-xs text-muted-foreground text-center">
+                  By clicking continue, you agree to our{" "}
+                  <Link href="/terms" className="text-primary hover:underline">Terms of Service</Link>
+                  {" "}and{" "}
+                  <Link href="/privacy" className="text-primary hover:underline">Privacy Policy</Link>.
+                </p>
 
                 <Button type="submit" className="w-full h-11">
                   Continue

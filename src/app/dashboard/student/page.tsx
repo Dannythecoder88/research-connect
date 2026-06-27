@@ -1,13 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Navbar } from "@/components/navbar";
 import { PageTransition, FadeIn } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import Link from "next/link";
 import {
   FileText,
@@ -17,33 +16,36 @@ import {
   Search,
   Info,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 
 export default function StudentDashboardPage() {
   // TODO: Fetch real applications from Supabase
-  // const applications = await supabase
-  //   .from("applications")
-  //   .select("*, listings(*)")
-  //   .eq("student_id", user.id)
-  //   .order("created_at", { ascending: false });
   const applications: never[] = [];
 
   // TODO: Fetch saved listings from Supabase
-  // const savedListings = await supabase
-  //   .from("saved_listings")
-  //   .select("*, listings(*)")
-  //   .eq("student_id", user.id)
-  //   .order("created_at", { ascending: false });
   const savedListings: never[] = [];
 
-  // TODO: Fetch profile completion percentage from Supabase
-  // const profile = await supabase
-  //   .from("student_profiles")
-  //   .select("*")
-  //   .eq("user_id", user.id)
-  //   .single();
-  // const profileCompletion = calculateProfileCompletion(profile);
-  const profileCompletion = 0;
+  const [profileCompletion, setProfileCompletion] = useState(0);
+
+  useEffect(() => {
+    async function loadProfileCompletion() {
+      const supabase = createClient();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+
+      const { data: profile } = await supabase
+        .from("student_profiles")
+        .select("profile_completion")
+        .eq("user_id", authUser.id)
+        .single();
+
+      if (profile) {
+        setProfileCompletion(profile.profile_completion || 0);
+      }
+    }
+
+    loadProfileCompletion();
+  }, []);
 
   return (
     <>

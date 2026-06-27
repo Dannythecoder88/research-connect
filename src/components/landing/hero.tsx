@@ -5,7 +5,12 @@ import { motion } from "framer-motion";
 import { ArrowRight, Search, Sparkles, GraduationCap, Microscope, FlaskConical, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function HeroSection() {
+interface HeroSectionProps {
+  role?: string | null;
+  isLoggedIn?: boolean;
+}
+
+export function HeroSection({ role, isLoggedIn }: HeroSectionProps) {
   return (
     <section className="relative overflow-hidden">
       {/* Background decoration */}
@@ -35,37 +40,73 @@ export function HeroSection() {
             </motion.div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] mb-6">
-              Bridge the Gap Between{" "}
-              <span className="text-primary">High School</span> and{" "}
-              <span className="bg-gradient-to-r from-emerald to-teal bg-clip-text text-transparent">
-                Breakthrough Research
-              </span>
+              {isLoggedIn && role === "student" ? (
+                <>
+                  Welcome Back,{" "}
+                  <span className="text-primary">Researcher-in-Training</span>
+                </>
+              ) : isLoggedIn && role === "researcher" ? (
+                <>
+                  Welcome Back,{" "}
+                  <span className="bg-gradient-to-r from-emerald to-teal bg-clip-text text-transparent">
+                    Professor
+                  </span>
+                </>
+              ) : (
+                <>
+                  Bridge the Gap Between{" "}
+                  <span className="text-primary">High School</span> and{" "}
+                  <span className="bg-gradient-to-r from-emerald to-teal bg-clip-text text-transparent">
+                    Breakthrough Research
+                  </span>
+                </>
+              )}
             </h1>
 
             <p className="text-lg sm:text-xl text-muted-foreground leading-relaxed mb-8">
-              Discover research opportunities, connect with mentors, and gain
-              real-world experience before college. Your future in science
-              starts here.
+              {isLoggedIn && role === "student"
+                ? "Browse research opportunities, track your applications, and connect with mentors across the Capital Region."
+                : isLoggedIn && role === "researcher"
+                ? "Post new positions, review applicants, and connect with ambitious high school students in the Capital Region."
+                : "Discover research opportunities, connect with mentors, and gain real-world experience before college. Your future in science starts here."}
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
-              <Button asChild size="lg" className="h-12 px-6 text-base">
-                <Link href="/opportunities">
-                  <Search className="h-4.5 w-4.5 mr-2" />
-                  Find a Lab
-                </Link>
-              </Button>
-              <Button
-                asChild
-                variant="outline"
-                size="lg"
-                className="h-12 px-6 text-base group"
-              >
-                <Link href="/auth/signup/researcher">
-                  Post a Position
-                  <ArrowRight className="h-4 w-4 ml-2 transition-transform group-hover:translate-x-0.5" />
-                </Link>
-              </Button>
+              {isLoggedIn && role === "student" ? (
+                <Button asChild size="lg" className="h-12 px-6 text-base">
+                  <Link href="/opportunities">
+                    <Search className="h-4.5 w-4.5 mr-2" />
+                    Find a Lab
+                  </Link>
+                </Button>
+              ) : isLoggedIn && role === "researcher" ? (
+                <Button asChild size="lg" className="h-12 px-6 text-base">
+                  <Link href="/dashboard/researcher">
+                    <ArrowRight className="h-4.5 w-4.5 mr-2" />
+                    Post a Position
+                  </Link>
+                </Button>
+              ) : (
+                <>
+                  <Button asChild size="lg" className="h-12 px-6 text-base">
+                    <Link href="/opportunities">
+                      <Search className="h-4.5 w-4.5 mr-2" />
+                      Find a Lab
+                    </Link>
+                  </Button>
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="lg"
+                    className="h-12 px-6 text-base group"
+                  >
+                    <Link href="/auth/signup/researcher">
+                      Post a Position
+                      <ArrowRight className="h-4 w-4 ml-2 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                  </Button>
+                </>
+              )}
             </div>
           </motion.div>
 

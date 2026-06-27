@@ -66,7 +66,7 @@ export default function ResearcherDashboardPage() {
                 </p>
               </div>
               <Button asChild className="gap-2 self-start">
-                <Link href="#">
+                <Link href="/dashboard/researcher/post">
                   <Plus className="h-4 w-4" />
                   Post New Position
                 </Link>
@@ -157,7 +157,7 @@ export default function ResearcherDashboardPage() {
                       from motivated students.
                     </p>
                     <Button asChild className="gap-2">
-                      <Link href="#">
+                      <Link href="/dashboard/researcher/post">
                         <Plus className="h-4 w-4" />
                         Post a Position
                       </Link>

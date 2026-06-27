@@ -12,9 +12,6 @@ import {
   FlaskConical,
   LogIn,
   LogOut,
-  GraduationCap,
-  Microscope,
-  LayoutDashboard,
   User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -138,21 +135,11 @@ export function Navbar() {
 
           {!loading && !user && (
             <>
-              <div className="flex items-center gap-1.5">
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/auth/signup/student" className="gap-1.5">
-                    <GraduationCap className="h-4 w-4" />
-                    Student
-                  </Link>
-                </Button>
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/auth/signup/researcher" className="gap-1.5">
-                    <Microscope className="h-4 w-4" />
-                    Researcher
-                  </Link>
-                </Button>
-              </div>
-
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/auth/signup" className="gap-1.5">
+                  Sign Up
+                </Link>
+              </Button>
               <Button asChild size="sm">
                 <Link href="/auth/login" className="gap-1.5">
                   <LogIn className="h-4 w-4" />
@@ -214,20 +201,12 @@ export function Navbar() {
                 {!loading && !user && (
                   <>
                     <Link
-                      href="/auth/signup/student"
+                      href="/auth/signup"
                       onClick={() => setMobileOpen(false)}
                       className="flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
-                      <GraduationCap className="h-4 w-4" />
-                      Sign Up as Student
-                    </Link>
-                    <Link
-                      href="/auth/signup/researcher"
-                      onClick={() => setMobileOpen(false)}
-                      className="flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <Microscope className="h-4 w-4" />
-                      Sign Up as Researcher
+                      <User className="h-4 w-4" />
+                      Sign Up
                     </Link>
 
                     <div className="px-4 pt-3">

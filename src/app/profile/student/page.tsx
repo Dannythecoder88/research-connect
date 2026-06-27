@@ -1,15 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { motion } from "framer-motion";
+import { useEffect, useState, useMemo, useRef } from "react";
 import {
   User,
   School,
   Mail,
   Phone,
   MapPin,
-  Calendar,
   FileText,
   Upload,
   CheckCircle2,
@@ -17,14 +14,16 @@ import {
   X,
   Save,
   GraduationCap,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -39,16 +38,46 @@ import { PageTransition, FadeIn } from "@/components/motion";
 import { SKILLS_LIST, RESEARCH_CATEGORIES } from "@/lib/constants";
 
 export default function StudentProfilePage() {
-  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(
-    new Set()
-  );
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [highSchool, setHighSchool] = useState("");
+  const [gradYear, setGradYear] = useState("");
+  const [location, setLocation] = useState("");
+  const [bio, setBio] = useState("");
+  const [whyResearch, setWhyResearch] = useState("");
+  const [resumeUrl, setResumeUrl] = useState("");
+  const [resumeFileName, setResumeFileName] = useState("");
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
   const [customSkill, setCustomSkill] = useState("");
   const [selectedInterests, setSelectedInterests] = useState<Set<string>>(
     new Set()
   );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentYear = new Date().getFullYear();
   const gradYears = Array.from({ length: 5 }, (_, i) => currentYear + i);
+
+  // Real-time client-side profile completion calculation
+  const completionPercent = useMemo(() => {
+    let completion = 0;
+    if (highSchool.trim()) completion += 10;
+    if (gradYear) completion += 10;
+    if (phone.trim()) completion += 5;
+    if (location.trim()) completion += 10;
+    if (bio.trim()) completion += 15;
+    if (whyResearch.trim()) completion += 15;
+    if (resumeUrl.trim()) completion += 15;
+    if (selectedSkills.size > 0) completion += 10;
+    if (selectedInterests.size > 0) completion += 10;
+    return completion;
+  }, [highSchool, gradYear, phone, location, bio, whyResearch, resumeUrl, selectedSkills, selectedInterests]);
 
   const toggleSkill = (skill: string) => {
     setSelectedSkills((prev) => {
@@ -75,8 +104,179 @@ export default function StudentProfilePage() {
     });
   };
 
-  // TODO: Calculate profile completion from Supabase profile data
-  const completionPercent = 0;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file size (5 MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Resume file must be under 5 MB.");
+      return;
+    }
+
+    setUploading(true);
+    setError("");
+
+    const supabase = createClient();
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+
+    if (!authUser) {
+      setUploading(false);
+      setError("You must be signed in to upload a resume.");
+      return;
+    }
+
+    const fileExt = file.name.split(".").pop();
+    const filePath = `${authUser.id}/resume.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("resumes")
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      setUploading(false);
+      setError("Failed to upload resume. Please try again.");
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("resumes")
+      .getPublicUrl(filePath);
+
+    setResumeUrl(urlData.publicUrl);
+    setResumeFileName(file.name);
+    setUploading(false);
+  };
+
+  useEffect(() => {
+    async function loadProfile() {
+      const supabase = createClient();
+      const {
+        data: { user: authUser },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !authUser) {
+        setLoading(false);
+        setError("You must be signed in to view your profile.");
+        return;
+      }
+
+      // Autofill from auth metadata first
+      const meta = authUser.user_metadata || {};
+      const metaFirstName = meta.first_name || "";
+      const metaLastName = meta.last_name || "";
+      const metaFullName = meta.full_name || "";
+
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("id, email, full_name")
+        .eq("id", authUser.id)
+        .single();
+
+      if (userError) {
+        setLoading(false);
+        setError("Failed to load your account information.");
+        return;
+      }
+
+      // Use profile data first, then fall back to signup metadata
+      const nameParts = (userData.full_name || "").split(" ");
+      setFirstName(metaFirstName || nameParts[0] || "");
+      setLastName(metaLastName || nameParts.slice(1).join(" ") || "");
+      setEmail(userData.email || authUser.email || "");
+
+      const { data: profile, error: profileError } = await supabase
+        .from("student_profiles")
+        .select("*")
+        .eq("user_id", authUser.id)
+        .single();
+
+      if (profile) {
+        setHighSchool(profile.high_school || meta.high_school || "");
+        setGradYear(profile.graduation_year ? String(profile.graduation_year) : (meta.grad_year || ""));
+        setLocation(profile.location || meta.location || "");
+        setPhone(profile.phone || meta.phone || "");
+        setBio(profile.bio || "");
+        setWhyResearch(profile.why_research || "");
+        setResumeUrl(profile.resume_url || "");
+        setSelectedSkills(new Set(profile.skills || []));
+        setSelectedInterests(new Set((profile.research_interests || []).map(String)));
+      } else {
+        // No profile row yet - autofill from signup metadata
+        setHighSchool(meta.high_school || "");
+        setGradYear(meta.grad_year || "");
+        setLocation(meta.location || "");
+        setPhone(meta.phone || "");
+
+        if (profileError && profileError.code !== "PGRST116") {
+          setError("Failed to load your profile.");
+        }
+      }
+
+      setLoading(false);
+    }
+
+    loadProfile();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    const supabase = createClient();
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser) {
+      setSaving(false);
+      setError("You must be signed in to save your profile.");
+      return;
+    }
+
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    const { error: userUpdateError } = await supabase
+      .from("users")
+      .update({ full_name: fullName || email })
+      .eq("id", authUser.id);
+
+    if (userUpdateError) {
+      setSaving(false);
+      setError("Failed to update your name. Please try again.");
+      return;
+    }
+
+    const profileData = {
+      user_id: authUser.id,
+      high_school: highSchool || null,
+      graduation_year: gradYear ? parseInt(gradYear, 10) : null,
+      location: location || null,
+      phone: phone || null,
+      bio: bio || null,
+      why_research: whyResearch || null,
+      resume_url: resumeUrl || null,
+      skills: Array.from(selectedSkills),
+      research_interests: Array.from(selectedInterests),
+    };
+
+    const { error: saveError } = await supabase
+      .from("student_profiles")
+      .upsert(profileData, { onConflict: "user_id" })
+      .select("id, profile_completion")
+      .single();
+
+    setSaving(false);
+
+    if (saveError) {
+      setError("Failed to save your profile. Please try again.");
+      return;
+    }
+
+    setSuccess("Profile saved successfully.");
+  };
 
   return (
     <>
@@ -95,12 +295,30 @@ export default function StudentProfilePage() {
                   Complete your profile to stand out to researchers.
                 </p>
               </div>
-              <Button className="gap-2">
-                <Save className="h-4 w-4" />
+              <Button className="gap-2" onClick={handleSave} disabled={saving || loading}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save Profile
               </Button>
             </div>
           </FadeIn>
+
+          {error && (
+            <FadeIn className="mb-6">
+              <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                <div>{error}</div>
+              </div>
+            </FadeIn>
+          )}
+
+          {success && (
+            <FadeIn className="mb-6">
+              <div className="flex items-start gap-3 rounded-lg border border-emerald/20 bg-emerald/10 p-4 text-sm text-emerald">
+                <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
+                <div>{success}</div>
+              </div>
+            </FadeIn>
+          )}
 
           {/* Completion bar */}
           <FadeIn delay={0.1} className="mb-8">
@@ -112,7 +330,9 @@ export default function StudentProfilePage() {
                 </div>
                 <Progress value={completionPercent} className="h-2" />
                 <p className="text-xs text-muted-foreground mt-2">
-                  Complete your profile to increase your chances of getting accepted.
+                  {completionPercent === 100
+                    ? "Your profile is complete! You're ready to apply."
+                    : "Complete your profile to increase your chances of getting accepted."}
                 </p>
               </CardContent>
             </Card>
@@ -132,11 +352,23 @@ export default function StudentProfilePage() {
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="firstName">First Name</Label>
-                      <Input id="firstName" placeholder="First name" />
+                      <Input
+                        id="firstName"
+                        placeholder="First name"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        disabled={loading}
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="lastName">Last Name</Label>
-                      <Input id="lastName" placeholder="Last name" />
+                      <Input
+                        id="lastName"
+                        placeholder="Last name"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        disabled={loading}
+                      />
                     </div>
                   </div>
 
@@ -150,6 +382,9 @@ export default function StudentProfilePage() {
                           type="email"
                           placeholder="you@example.com"
                           className="pl-9"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          disabled={loading}
                         />
                       </div>
                     </div>
@@ -162,6 +397,9 @@ export default function StudentProfilePage() {
                           type="tel"
                           placeholder="(555) 123-4567"
                           className="pl-9"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          disabled={loading}
                         />
                       </div>
                     </div>
@@ -176,14 +414,17 @@ export default function StudentProfilePage() {
                           id="highSchool"
                           placeholder="Your high school"
                           className="pl-9"
+                          value={highSchool}
+                          onChange={(e) => setHighSchool(e.target.value)}
+                          disabled={loading}
                         />
                       </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="gradYear">Graduation Year</Label>
-                      <Select>
+                      <Select value={gradYear} onValueChange={(v) => setGradYear(v ?? "")} disabled={loading}>
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue placeholder="Select year" />
                         </SelectTrigger>
                         <SelectContent>
                           {gradYears.map((year) => (
@@ -204,6 +445,9 @@ export default function StudentProfilePage() {
                         id="location"
                         placeholder="City, State"
                         className="pl-9"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -261,6 +505,9 @@ export default function StudentProfilePage() {
                       id="bio"
                       placeholder="Tell researchers about yourself in 2-3 sentences..."
                       rows={3}
+                      value={bio}
+                      onChange={(e) => setBio(e.target.value)}
+                      disabled={loading}
                     />
                     <p className="text-xs text-muted-foreground">
                       This appears on your application submissions.
@@ -273,6 +520,9 @@ export default function StudentProfilePage() {
                       id="whyResearch"
                       placeholder="What drives your interest in research?"
                       rows={3}
+                      value={whyResearch}
+                      onChange={(e) => setWhyResearch(e.target.value)}
+                      disabled={loading}
                     />
                   </div>
                 </CardContent>
@@ -346,7 +596,7 @@ export default function StudentProfilePage() {
               </Card>
             </FadeIn>
 
-            {/* Resume Upload */}
+            {/* Resume */}
             <FadeIn delay={0.35}>
               <Card>
                 <CardHeader>
@@ -355,18 +605,57 @@ export default function StudentProfilePage() {
                     Resume
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/30 transition-colors">
-                    <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-sm font-medium mb-1">
-                      Upload your resume
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Upload your resume</Label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.doc,.docx"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading || loading}
+                        className="gap-2"
+                      >
+                        {uploading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        {uploading ? "Uploading..." : "Choose File"}
+                      </Button>
+                      {resumeFileName && (
+                        <span className="text-sm text-muted-foreground truncate max-w-[200px]">
+                          {resumeFileName}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      PDF, DOC, or DOCX. Max 5 MB.
                     </p>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      PDF, DOC, or DOCX up to 5MB
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-2">
+                    <Label htmlFor="resumeUrl">Or paste a link</Label>
+                    <Input
+                      id="resumeUrl"
+                      type="url"
+                      placeholder="https://drive.google.com/... or https://..."
+                      value={resumeUrl}
+                      onChange={(e) => setResumeUrl(e.target.value)}
+                      disabled={loading}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Google Drive, Dropbox, or any public URL.
                     </p>
-                    <Button variant="outline" size="sm">
-                      Choose File
-                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -374,8 +663,8 @@ export default function StudentProfilePage() {
 
             {/* Save button */}
             <div className="flex justify-end pb-8">
-              <Button size="lg" className="gap-2">
-                <Save className="h-4 w-4" />
+              <Button size="lg" className="gap-2" onClick={handleSave} disabled={saving || loading}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save Profile
               </Button>
             </div>
