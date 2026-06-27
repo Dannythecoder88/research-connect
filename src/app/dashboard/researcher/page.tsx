@@ -19,6 +19,7 @@ import {
   School,
   Calendar,
   MapPin,
+  Phone,
   FileText as FileTextIcon,
   Send,
 } from "lucide-react";
@@ -97,6 +98,7 @@ type Application = {
     user_id?: string;
     high_school?: string;
     graduation_year?: number;
+    phone?: string;
     location?: string;
     bio?: string;
     why_research?: string;
@@ -104,11 +106,11 @@ type Application = {
     skills?: string[];
     research_interests?: string[];
     users?: { full_name: string; email: string } | null;
-  }[];
+  } | null;
   research_listings: {
     id: string;
     title: string;
-  }[];
+  } | null;
 };
 
 type Message = {
@@ -170,7 +172,7 @@ export default function ResearcherDashboardPage() {
     ]);
 
     setListings(listingsData || []);
-    setApplications(applicationsData || []);
+    setApplications((applicationsData || []) as unknown as Application[]);
     setLoading(false);
   }
 
@@ -250,7 +252,7 @@ export default function ResearcherDashboardPage() {
   };
 
   const applicantCountByListing = (listingId: string) =>
-    applications.filter((a) => a.research_listings[0]?.id === listingId).length;
+    applications.filter((a) => a.research_listings?.id === listingId).length;
 
   const getInitials = (name: string) => {
     return name
@@ -261,10 +263,10 @@ export default function ResearcherDashboardPage() {
       .slice(0, 2);
   };
 
-  const selectedStudent = selectedApplication?.student_profiles[0];
+  const selectedStudent = selectedApplication?.student_profiles;
   const selectedName = selectedStudent?.users?.full_name || "Student";
   const selectedEmail = selectedStudent?.users?.email || "";
-  const selectedListingTitle = selectedApplication?.research_listings[0]?.title || "Untitled Position";
+  const selectedListingTitle = selectedApplication?.research_listings?.title || "Untitled Position";
 
   return (
     <>
@@ -472,9 +474,9 @@ export default function ResearcherDashboardPage() {
                     ) : (
                       <div className="grid gap-4 sm:grid-cols-2">
                         {applications.map((application) => {
-                          const studentProfile = application.student_profiles[0];
+                          const studentProfile = application.student_profiles;
                           const studentName = studentProfile?.users?.full_name || "Student";
-                          const listingTitle = application.research_listings[0]?.title || "Untitled Position";
+                          const listingTitle = application.research_listings?.title || "Untitled Position";
 
                           return (
                             <Card
@@ -613,6 +615,13 @@ export default function ResearcherDashboardPage() {
                     <p className="text-muted-foreground">{selectedStudent?.location || "Not provided"}</p>
                   </div>
                 </div>
+                <div className="flex items-start gap-2">
+                  <Phone className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <div>
+                    <p className="font-medium">Phone</p>
+                    <p className="text-muted-foreground">{selectedStudent?.phone || "Not provided"}</p>
+                  </div>
+                </div>
                 {selectedStudent?.bio && (
                   <div className="flex items-start gap-2">
                     <FileTextIcon className="h-4 w-4 text-muted-foreground mt-0.5" />
@@ -715,6 +724,7 @@ export default function ResearcherDashboardPage() {
                     return (
                       <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${isMe ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                          <p className="text-[10px] opacity-80 mb-0.5">{isMe ? "You" : selectedName}</p>
                           <p>{msg.content}</p>
                           <p className="text-[10px] opacity-70 mt-1">
                             {new Date(msg.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "numeric" })}

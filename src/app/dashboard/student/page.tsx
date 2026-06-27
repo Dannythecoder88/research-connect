@@ -36,6 +36,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  RESEARCH_CATEGORIES,
+  COMMITMENT_TYPES,
+  LOCATION_TYPES,
+} from "@/lib/constants";
 
 const statusLabels: Record<string, string> = {
   pending: "Pending",
@@ -61,8 +66,12 @@ type Application = {
   research_listings: {
     id: string;
     title: string;
-  }[];
-  lab_name: string;
+    researcher_id: string;
+    researcher_profiles: {
+      lab_name: string;
+      lead_researcher?: string;
+    } | null;
+  } | null;
 };
 
 type SavedListing = {
@@ -73,7 +82,25 @@ type SavedListing = {
     description: string;
     location: string;
     weekly_hours: string;
-  }[];
+  } | null;
+};
+
+type ListingDetail = {
+  id: string;
+  title: string;
+  organization: string;
+  category: string;
+  commitment: string;
+  hours: string;
+  location: string;
+  posted: string;
+  description: string;
+  responsibilities: string[];
+  skills: string[];
+  researchArea: string;
+  payType: "unpaid" | "hourly";
+  hourlyPay: number | null;
+  professorName: string;
 };
 
 type Message = {
@@ -89,6 +116,9 @@ export default function StudentDashboardPage() {
   const [profileCompletion, setProfileCompletion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+  const [selectedListingForDetail, setSelectedListingForDetail] = useState<ListingDetail | null>(null);
+  const [listingDetailOpen, setListingDetailOpen] = useState(false);
+  const [listingDetailLoading, setListingDetailLoading] = useState(false);
   const [messageOpen, setMessageOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState("");
@@ -125,7 +155,7 @@ export default function StudentDashboardPage() {
       const [{ data: appsData }, { data: savedData }] = await Promise.all([
         supabase
           .from("applications")
-          .select("id, status, applied_at, cover_message, research_listings(id, title, researcher_id)")
+          .select("id, status, applied_at, cover_message, research_listings(id, title, researcher_id, researcher_profiles(lab_name, lead_researcher))")
           .eq("student_id", studentProfile.id)
           .order("applied_at", { ascending: false }),
         supabase
@@ -135,24 +165,8 @@ export default function StudentDashboardPage() {
           .order("saved_at", { ascending: false }),
       ]);
 
-      const rawApps = (appsData || []) as any[];
-      const researcherIds = [...new Set(rawApps.map((a) => a.research_listings?.[0]?.researcher_id).filter(Boolean))];
-      let labMap = new Map<string, string>();
-      if (researcherIds.length > 0) {
-        const { data: researchers } = await supabase
-          .from("researcher_profiles")
-          .select("id, lab_name")
-          .in("id", researcherIds);
-        (researchers || []).forEach((r: any) => labMap.set(r.id, r.lab_name));
-      }
-
-      const enrichedApps: Application[] = rawApps.map((a) => ({
-        ...a,
-        lab_name: labMap.get(a.research_listings?.[0]?.researcher_id) || "Unknown Lab",
-      }));
-
-      setApplications(enrichedApps);
-      setSavedListings((savedData as SavedListing[]) || []);
+      setApplications((appsData || []) as unknown as Application[]);
+      setSavedListings((savedData || []) as unknown as SavedListing[]);
       setLoading(false);
     }
 
@@ -168,6 +182,39 @@ export default function StudentDashboardPage() {
       .order("created_at", { ascending: true });
     setMessages(data || []);
   }
+
+  const openListingDetail = async (listingId: string) => {
+    setListingDetailOpen(true);
+    setListingDetailLoading(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("research_listings")
+      .select("*, researcher_profiles(lab_name, lead_researcher)")
+      .eq("id", listingId)
+      .single();
+    if (data) {
+      setSelectedListingForDetail({
+        id: data.id,
+        title: data.title,
+        organization: data.researcher_profiles?.lab_name || "Unknown Lab",
+        category: data.category,
+        commitment: data.commitment,
+        hours: data.weekly_hours || "TBD",
+        location: data.location,
+        posted: new Date(data.posted_at).toLocaleDateString("en-US", {
+          month: "short", day: "numeric", year: "numeric",
+        }),
+        description: data.description,
+        responsibilities: data.responsibilities || [],
+        skills: data.required_skills || [],
+        researchArea: data.research_area || "",
+        payType: data.pay_type || "unpaid",
+        hourlyPay: data.hourly_pay || null,
+        professorName: data.researcher_profiles?.lead_researcher || "Professor",
+      });
+    }
+    setListingDetailLoading(false);
+  };
 
   async function sendMessage() {
     if (!selectedApplication || !messageText.trim()) return;
@@ -310,22 +357,27 @@ export default function StudentDashboardPage() {
                     ) : (
                       <div className="space-y-4">
                         {applications.map((application) => {
-                          const listing = application.research_listings[0];
-                          const lab = application.lab_name || "Unknown Lab";
+                          const listing = application.research_listings;
+                          const lab = listing?.researcher_profiles?.lab_name || "Unknown Lab";
+                          const professor = listing?.researcher_profiles?.lead_researcher || "Professor";
                           return (
                             <Card key={application.id} className="border border-border/50 shadow-none">
                               <CardContent className="p-4">
                                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                                   <div>
-                                    <Link
-                                      href={`/opportunities?listing=${listing?.id || ""}`}
-                                      className="font-semibold text-base hover:underline"
+                                    <button
+                                      onClick={() => listing && openListingDetail(listing.id)}
+                                      className="font-semibold text-base hover:underline text-left"
                                     >
                                       {listing?.title || "Untitled Position"}
-                                    </Link>
+                                    </button>
                                     <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                                       <Building2 className="h-3.5 w-3.5" />
                                       {lab}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                      <User className="h-3 w-3" />
+                                      {professor}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-1">
                                       Applied {new Date(application.applied_at).toLocaleDateString("en-US", {
@@ -402,7 +454,7 @@ export default function StudentDashboardPage() {
                     ) : (
                       <div className="space-y-4">
                         {savedListings.map((saved) => {
-                          const listing = saved.research_listings[0];
+                          const listing = saved.research_listings;
                           return (
                             <Card key={saved.id} className="border border-border/50 shadow-none">
                               <CardContent className="p-4">
@@ -412,8 +464,8 @@ export default function StudentDashboardPage() {
                                   <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {listing?.location}</span>
                                   <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {listing?.weekly_hours || "TBD"} hrs/week</span>
                                 </div>
-                                <Button asChild variant="outline" size="sm" className="mt-3">
-                                  <Link href="/opportunities">View Position</Link>
+                                <Button variant="outline" size="sm" className="mt-3" onClick={() => listing && openListingDetail(listing.id)}>
+                                  View Position
                                 </Button>
                               </CardContent>
                             </Card>
@@ -470,7 +522,7 @@ export default function StudentDashboardPage() {
             <DialogDescription>
               This will remove your application for{" "}
               <span className="font-medium text-foreground">
-                {applicationToDelete?.research_listings[0]?.title || "this position"}
+                {applicationToDelete?.research_listings?.title || "this position"}
               </span>
               . You can apply again later if you change your mind.
             </DialogDescription>
@@ -497,10 +549,10 @@ export default function StudentDashboardPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              Message {selectedApplication?.lab_name || "Professor"}
+              Message {selectedApplication?.research_listings?.researcher_profiles?.lead_researcher || "Professor"}
             </DialogTitle>
             <DialogDescription>
-              Position: {selectedApplication?.research_listings[0]?.title || "Untitled Position"}
+              Position: {selectedApplication?.research_listings?.title || "Untitled Position"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -511,9 +563,11 @@ export default function StudentDashboardPage() {
                 <div className="space-y-3">
                   {messages.map((msg) => {
                     const isMe = msg.sender_id === currentUserId;
+                    const professorName = selectedApplication?.research_listings?.researcher_profiles?.lead_researcher || "Professor";
                     return (
                       <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${isMe ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                          <p className="text-[10px] opacity-80 mb-0.5">{isMe ? "You" : professorName}</p>
                           <p>{msg.content}</p>
                           <p className="text-[10px] opacity-70 mt-1">
                             {new Date(msg.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "numeric" })}
@@ -541,6 +595,79 @@ export default function StudentDashboardPage() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Listing Detail Dialog */}
+      <Dialog open={listingDetailOpen} onOpenChange={setListingDetailOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{selectedListingForDetail?.title || "Position Details"}</DialogTitle>
+            <DialogDescription>
+              {selectedListingForDetail?.organization} — {selectedListingForDetail?.professorName}
+            </DialogDescription>
+          </DialogHeader>
+          {listingDetailLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : selectedListingForDetail ? (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  {RESEARCH_CATEGORIES.find((c) => c.id === selectedListingForDetail.category)?.name || selectedListingForDetail.category}
+                </Badge>
+                <Badge variant="secondary">
+                  {COMMITMENT_TYPES.find((c) => c.id === selectedListingForDetail.commitment)?.label || selectedListingForDetail.commitment}
+                </Badge>
+                <Badge variant="secondary">
+                  <MapPin className="h-3 w-3 mr-1" />
+                  {LOCATION_TYPES.find((l) => l.id === selectedListingForDetail.location)?.label || selectedListingForDetail.location}
+                </Badge>
+                <Badge variant="secondary">
+                  <Clock className="h-3 w-3 mr-1" />
+                  {selectedListingForDetail.hours} hrs/week
+                </Badge>
+                <Badge variant="secondary" className={selectedListingForDetail.payType === "hourly" ? "bg-emerald/10 text-emerald" : ""}>
+                  {selectedListingForDetail.payType === "hourly" ? `$${selectedListingForDetail.hourlyPay}/hr` : "Unpaid"}
+                </Badge>
+              </div>
+              <div>
+                <p className="font-medium mb-1">Description</p>
+                <p className="text-muted-foreground leading-relaxed">{selectedListingForDetail.description}</p>
+              </div>
+              {selectedListingForDetail.responsibilities.length > 0 && (
+                <div>
+                  <p className="font-medium mb-1">Responsibilities</p>
+                  <ul className="space-y-1 text-muted-foreground">
+                    {selectedListingForDetail.responsibilities.map((r) => (
+                      <li key={r} className="flex items-start gap-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {selectedListingForDetail.skills.length > 0 && (
+                <div>
+                  <p className="font-medium mb-1">Required Skills</p>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedListingForDetail.skills.map((skill) => (
+                      <Badge key={skill} variant="outline">{skill}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {selectedListingForDetail.researchArea && (
+                <div>
+                  <p className="font-medium mb-1">Research Area</p>
+                  <p className="text-muted-foreground">{selectedListingForDetail.researchArea}</p>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Posted {selectedListingForDetail.posted}</p>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

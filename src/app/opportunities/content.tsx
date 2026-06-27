@@ -10,6 +10,7 @@ import {
   MapPin,
   Clock,
   Building2,
+  User,
   Bookmark,
   BookmarkCheck,
   Send,
@@ -44,6 +45,7 @@ type Listing = {
   id: string;
   title: string;
   organization: string;
+  professorName: string;
   category: string;
   commitment: string;
   hours: string;
@@ -59,12 +61,36 @@ type Listing = {
 
 export default function OpportunitiesContent({
   initialUser,
+  initialListings,
 }: {
   initialUser: SupabaseUser | null;
+  initialListings: any[] | null;
 }) {
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
-  const [listings, setListings] = useState<Listing[]>([]);
+  const [listings, setListings] = useState<Listing[]>(() => {
+    return (initialListings || []).map((item: any) => ({
+      id: item.id,
+      title: item.title,
+      organization: item.researcher_profiles?.lab_name || "Unknown Lab",
+      professorName: item.researcher_profiles?.lead_researcher || "Professor",
+      category: item.category,
+      commitment: item.commitment,
+      hours: item.weekly_hours || "TBD",
+      location: item.location,
+      posted: new Date(item.posted_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      description: item.description,
+      responsibilities: item.responsibilities || [],
+      skills: item.required_skills || [],
+      researchArea: item.research_area || "",
+      payType: item.pay_type || "unpaid",
+      hourlyPay: item.hourly_pay || null,
+    }));
+  });
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
@@ -164,42 +190,6 @@ export default function OpportunitiesContent({
     }
   }, [searchParams, listings]);
 
-  // Fetch listings from Supabase
-  useEffect(() => {
-    async function fetchListings() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("research_listings")
-        .select("*, researcher_profiles(lab_name)")
-        .eq("status", "active")
-        .order("posted_at", { ascending: false });
-
-      if (data) {
-        const mapped: Listing[] = data.map((item: any) => ({
-          id: item.id,
-          title: item.title,
-          organization: item.researcher_profiles?.lab_name || "Unknown Lab",
-          category: item.category,
-          commitment: item.commitment,
-          hours: item.weekly_hours || "TBD",
-          location: item.location,
-          posted: new Date(item.posted_at).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          }),
-          description: item.description,
-          responsibilities: item.responsibilities || [],
-          skills: item.required_skills || [],
-          researchArea: item.research_area || "",
-          payType: item.pay_type || "unpaid",
-          hourlyPay: item.hourly_pay || null,
-        }));
-        setListings(mapped);
-      }
-    }
-    fetchListings();
-  }, []);
 
   const toggleSaved = (id: string) => {
     if (!user) return;
@@ -737,6 +727,10 @@ function DetailPane({
         <p className="text-muted-foreground flex items-center gap-1.5">
           <Building2 className="h-4 w-4" />
           {listing.organization}
+        </p>
+        <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
+          <User className="h-4 w-4" />
+          {listing.professorName}
         </p>
       </div>
 
