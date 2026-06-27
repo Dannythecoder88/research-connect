@@ -1,0 +1,886 @@
+"use client";
+
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
+import {
+  Search,
+  Filter,
+  MapPin,
+  Clock,
+  Building2,
+  Bookmark,
+  BookmarkCheck,
+  Send,
+  X,
+  CheckCircle2,
+  SlidersHorizontal,
+  FlaskConical,
+  Lock,
+  Loader2,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Navbar } from "@/components/navbar";
+import { PageTransition } from "@/components/motion";
+import {
+  RESEARCH_CATEGORIES,
+  COMMITMENT_TYPES,
+  LOCATION_TYPES,
+} from "@/lib/constants";
+import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+
+// Listing type matching database schema
+type Listing = {
+  id: string;
+  title: string;
+  organization: string;
+  category: string;
+  commitment: string;
+  hours: string;
+  location: string;
+  posted: string;
+  description: string;
+  responsibilities: string[];
+  skills: string[];
+  researchArea: string;
+  payType: "unpaid" | "hourly";
+  hourlyPay: number | null;
+};
+
+export default function OpportunitiesContent({
+  initialUser,
+}: {
+  initialUser: SupabaseUser | null;
+}) {
+  const searchParams = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [showApplySuccess, setShowApplySuccess] = useState(false);
+  const [applySuccessId, setApplySuccessId] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyingIds, setApplyingIds] = useState<Set<string>>(new Set());
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const [selectedCommitments, setSelectedCommitments] = useState<Set<string>>(new Set());
+  const [selectedLocations, setSelectedLocations] = useState<Set<string>>(new Set());
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [user, setUser] = useState<SupabaseUser | null>(initialUser);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Sync auth state from the client as well (e.g., sign-in/out while page is open)
+  useEffect(() => {
+    const supabase = createClient();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch user role whenever user changes
+  useEffect(() => {
+    async function loadRole() {
+      if (!user) {
+        setUserRole(null);
+        return;
+      }
+      const supabase = createClient();
+      const { data: userRecord } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+      setUserRole(userRecord?.role || null);
+    }
+    loadRole();
+  }, [user]);
+
+  // Fetch saved listings and existing applications for this student
+  useEffect(() => {
+    if (!user) return;
+    const userId = user.id;
+    async function fetchUserData() {
+      const supabase = createClient();
+      const { data: studentProfile } = await supabase
+        .from("student_profiles")
+        .select("id")
+        .eq("user_id", userId)
+        .single();
+
+      if (!studentProfile) return;
+
+      const { data: applications } = await supabase
+        .from("applications")
+        .select("listing_id")
+        .eq("student_id", studentProfile.id);
+
+      if (applications) {
+        setAppliedIds(new Set(applications.map((a) => a.listing_id)));
+      }
+
+      const { data: saved } = await supabase
+        .from("saved_listings")
+        .select("listing_id")
+        .eq("student_id", studentProfile.id);
+
+      if (saved) {
+        setSavedIds(new Set(saved.map((s) => s.listing_id)));
+      }
+    }
+    fetchUserData();
+  }, [user]);
+
+  // Initialize category filter from URL params (for smart category boxes)
+  useEffect(() => {
+    const categoryParam = searchParams.get("category");
+    if (categoryParam) {
+      setSelectedCategories(new Set([categoryParam]));
+    }
+  }, [searchParams]);
+
+  // Pre-select a specific listing from URL param (e.g., from dashboard "View Position")
+  useEffect(() => {
+    const listingParam = searchParams.get("listing");
+    if (listingParam && listings.length > 0) {
+      const listing = listings.find((l) => l.id === listingParam);
+      if (listing) {
+        setSelectedListing(listing);
+        setMobileDetailOpen(true);
+      }
+    }
+  }, [searchParams, listings]);
+
+  // Fetch listings from Supabase
+  useEffect(() => {
+    async function fetchListings() {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("research_listings")
+        .select("*, researcher_profiles(lab_name)")
+        .eq("status", "active")
+        .order("posted_at", { ascending: false });
+
+      if (data) {
+        const mapped: Listing[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          organization: item.researcher_profiles?.lab_name || "Unknown Lab",
+          category: item.category,
+          commitment: item.commitment,
+          hours: item.weekly_hours || "TBD",
+          location: item.location,
+          posted: new Date(item.posted_at).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
+          description: item.description,
+          responsibilities: item.responsibilities || [],
+          skills: item.required_skills || [],
+          researchArea: item.research_area || "",
+          payType: item.pay_type || "unpaid",
+          hourlyPay: item.hourly_pay || null,
+        }));
+        setListings(mapped);
+      }
+    }
+    fetchListings();
+  }, []);
+
+  const toggleSaved = (id: string) => {
+    if (!user) return;
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const isResearcher = userRole === "researcher";
+
+  const handleApply = async (id: string) => {
+    if (!user || isResearcher) return;
+    setApplyError(null);
+    setApplySuccessId(null);
+    setApplyingIds((prev) => new Set(prev).add(id));
+
+    const supabase = createClient();
+
+    const { data: studentProfile } = await supabase
+      .from("student_profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .single();
+
+    if (!studentProfile) {
+      setApplyingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setApplyError("Please complete your student profile before applying.");
+      return;
+    }
+
+    const { error: applyError } = await supabase.from("applications").insert({
+      student_id: studentProfile.id,
+      listing_id: id,
+    });
+
+    setApplyingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    if (applyError) {
+      // Duplicate application - treat as already applied
+      if (applyError.message?.toLowerCase().includes("duplicate") || applyError.code === "23505") {
+        setAppliedIds((prev) => new Set(prev).add(id));
+        setApplySuccessId(id);
+        setShowApplySuccess(true);
+        setTimeout(() => {
+          setShowApplySuccess(false);
+          setApplySuccessId(null);
+        }, 3000);
+        return;
+      }
+      setApplyError(applyError.message);
+      return;
+    }
+
+    setAppliedIds((prev) => new Set(prev).add(id));
+    setApplySuccessId(id);
+    setShowApplySuccess(true);
+    setTimeout(() => {
+      setShowApplySuccess(false);
+      setApplySuccessId(null);
+    }, 3000);
+  };
+
+  const toggleFilter = (
+    set: Set<string>,
+    setter: React.Dispatch<React.SetStateAction<Set<string>>>,
+    value: string
+  ) => {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
+
+  const filteredListings = useMemo(() => {
+    return listings.filter((listing) => {
+      const matchesSearch =
+        !searchQuery ||
+        listing.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        listing.organization.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        listing.description.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory =
+        selectedCategories.size === 0 || selectedCategories.has(listing.category);
+      const matchesCommitment =
+        selectedCommitments.size === 0 || selectedCommitments.has(listing.commitment);
+      const matchesLocation =
+        selectedLocations.size === 0 || selectedLocations.has(listing.location);
+      return matchesSearch && matchesCategory && matchesCommitment && matchesLocation;
+    });
+  }, [listings, searchQuery, selectedCategories, selectedCommitments, selectedLocations]);
+
+  const activeFilterCount =
+    selectedCategories.size + selectedCommitments.size + selectedLocations.size;
+
+  const getCategoryName = (id: string) =>
+    RESEARCH_CATEGORIES.find((c) => c.id === id)?.name ?? id;
+  const getCommitment = (id: string) =>
+    COMMITMENT_TYPES.find((c) => c.id === id);
+  const getLocation = (id: string) =>
+    LOCATION_TYPES.find((l) => l.id === id);
+
+  // For unauthenticated users, show top 3 fully, blur the rest
+  const isGuest = !authLoading && !user;
+  const GUEST_VISIBLE_COUNT = 3;
+
+  const FilterPanel = () => (
+    <div className="space-y-6">
+      <div>
+        <h4 className="text-sm font-semibold mb-3">Category</h4>
+        <div className="space-y-2">
+          {RESEARCH_CATEGORIES.map((cat) => (
+            <div key={cat.id} className="flex items-center space-x-2">
+              <Checkbox
+                id={`cat-${cat.id}`}
+                checked={selectedCategories.has(cat.id)}
+                onCheckedChange={() =>
+                  toggleFilter(selectedCategories, setSelectedCategories, cat.id)
+                }
+              />
+              <Label htmlFor={`cat-${cat.id}`} className="text-sm cursor-pointer">
+                {cat.name}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Separator />
+
+      <div>
+        <h4 className="text-sm font-semibold mb-3">Commitment</h4>
+        <div className="space-y-2">
+          {COMMITMENT_TYPES.map((type) => (
+            <div key={type.id} className="flex items-center space-x-2">
+              <Checkbox
+                id={`com-${type.id}`}
+                checked={selectedCommitments.has(type.id)}
+                onCheckedChange={() =>
+                  toggleFilter(selectedCommitments, setSelectedCommitments, type.id)
+                }
+              />
+              <Label htmlFor={`com-${type.id}`} className="text-sm cursor-pointer">
+                {type.label}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Separator />
+
+      <div>
+        <h4 className="text-sm font-semibold mb-3">Location</h4>
+        <div className="space-y-2">
+          {LOCATION_TYPES.map((type) => (
+            <div key={type.id} className="flex items-center space-x-2">
+              <Checkbox
+                id={`loc-${type.id}`}
+                checked={selectedLocations.has(type.id)}
+                onCheckedChange={() =>
+                  toggleFilter(selectedLocations, setSelectedLocations, type.id)
+                }
+              />
+              <Label htmlFor={`loc-${type.id}`} className="text-sm cursor-pointer">
+                {type.label}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {activeFilterCount > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setSelectedCategories(new Set());
+            setSelectedCommitments(new Set());
+            setSelectedLocations(new Set());
+          }}
+          className="w-full text-muted-foreground"
+        >
+          Clear all filters
+        </Button>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      <Navbar />
+      <PageTransition>
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+          {/* Search and filter bar */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search positions, labs, or keywords..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-11"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Mobile filter button */}
+            <Sheet>
+              <SheetTrigger className="inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted lg:hidden h-11 w-11 relative">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  {activeFilterCount > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center">
+                      {activeFilterCount}
+                    </span>
+                  )}
+              </SheetTrigger>
+              <SheetContent side="left" className="w-72 pt-12">
+                <h3 className="text-lg font-semibold mb-6">Filters</h3>
+                <FilterPanel />
+              </SheetContent>
+            </Sheet>
+          </div>
+
+          {/* Results count */}
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-muted-foreground">
+              {filteredListings.length} opportunit{filteredListings.length === 1 ? "y" : "ies"} found
+            </p>
+            {activeFilterCount > 0 && (
+              <div className="hidden lg:flex items-center gap-2">
+                {Array.from(selectedCategories).map((id) => (
+                  <Badge
+                    key={id}
+                    variant="secondary"
+                    className="text-xs cursor-pointer"
+                    onClick={() =>
+                      toggleFilter(selectedCategories, setSelectedCategories, id)
+                    }
+                  >
+                    {getCategoryName(id)}
+                    <X className="h-3 w-3 ml-1" />
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Main content: split layout */}
+          <div className="flex gap-6">
+            {/* Left sidebar: Filters (desktop) */}
+            <div className="hidden lg:block w-56 flex-shrink-0">
+              <div className="sticky top-24">
+                <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                  <Filter className="h-4 w-4" />
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <Badge variant="secondary" className="text-xs h-5">
+                      {activeFilterCount}
+                    </Badge>
+                  )}
+                </h3>
+                <FilterPanel />
+              </div>
+            </div>
+
+            {/* Middle: Listing cards */}
+            <div className="flex-1 lg:max-w-md">
+              <ScrollArea className="h-[calc(100vh-12rem)]">
+                <div className="space-y-3 pr-2">
+                  <AnimatePresence mode="popLayout">
+                    {filteredListings.map((listing, index) => {
+                      const isBlurred = isGuest && index >= GUEST_VISIBLE_COUNT;
+
+                      return (
+                        <motion.div
+                          key={listing.id}
+                          layout
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ duration: 0.2 }}
+                          className="relative"
+                        >
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (isGuest) {
+                                window.location.href = "/auth/signup";
+                                return;
+                              }
+                              setSelectedListing(listing);
+                              setMobileDetailOpen(true);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                if (isGuest) {
+                                  window.location.href = "/auth/signup";
+                                  return;
+                                }
+                                setSelectedListing(listing);
+                                setMobileDetailOpen(true);
+                              }
+                            }}
+                            className={cn(
+                              "w-full text-left p-4 rounded-xl border transition-all cursor-pointer",
+                              isBlurred && "blur-[6px] select-none pointer-events-none",
+                              selectedListing?.id === listing.id
+                                ? "border-primary bg-primary/5 shadow-sm"
+                                : "border-border bg-card hover:border-primary/30 hover:shadow-sm"
+                            )}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-sm truncate">
+                                  {listing.title}
+                                </h3>
+                                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                  <Building2 className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate">{listing.organization}</span>
+                                </p>
+                              </div>
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSaved(listing.id);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.stopPropagation();
+                                    toggleSaved(listing.id);
+                                  }
+                                }}
+                                className="text-muted-foreground hover:text-primary transition-colors p-1 cursor-pointer"
+                              >
+                                {savedIds.has(listing.id) ? (
+                                  <BookmarkCheck className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <Bookmark className="h-4 w-4" />
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              <Badge
+                                variant="secondary"
+                                className={cn(
+                                  "text-[10px]",
+                                  getCommitment(listing.commitment)?.color
+                                )}
+                              >
+                                {getCommitment(listing.commitment)?.label}
+                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] bg-muted">
+                                <MapPin className="h-2.5 w-2.5 mr-0.5" />
+                                {getLocation(listing.location)?.label}
+                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] bg-muted">
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                {listing.hours} hrs
+                              </Badge>
+                              <Badge
+                                variant="secondary"
+                                className={`text-[10px] ${listing.payType === "hourly" ? "bg-emerald/10 text-emerald" : "bg-muted"}`}
+                              >
+                                {listing.payType === "hourly" ? `$${listing.hourlyPay}/hr` : "Unpaid"}
+                              </Badge>
+                            </div>
+
+                            <p className="text-[11px] text-muted-foreground mt-2">
+                              Posted {listing.posted}
+                            </p>
+                          </div>
+
+                          {/* Overlay for blurred cards to capture clicks */}
+                          {isBlurred && (
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => { window.location.href = "/auth/signup"; }}
+                              onKeyDown={(e) => { if (e.key === "Enter") window.location.href = "/auth/signup"; }}
+                              className="absolute inset-0 cursor-pointer z-10"
+                            />
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+
+                  {/* Guest sign-up prompt over blurred listings */}
+                  {isGuest && filteredListings.length > GUEST_VISIBLE_COUNT && (
+                    <div className="relative -mt-16 pt-20 pb-6 text-center bg-gradient-to-t from-background via-background/95 to-transparent">
+                      <Lock className="h-6 w-6 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium mb-1">
+                        Sign up to unlock all positions
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-4 max-w-xs mx-auto">
+                        Sign up or log in for free to unlock access to dozens of local research positions.
+                      </p>
+                      <Button asChild size="sm">
+                        <Link href="/auth/signup">Create Free Account</Link>
+                      </Button>
+                    </div>
+                  )}
+
+                  {filteredListings.length === 0 && (
+                    <div className="text-center py-16">
+                      <FlaskConical className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
+                      <p className="font-medium mb-2">No opportunities yet</p>
+                      <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                        {listings.length === 0
+                          ? "Research opportunities will appear here as labs and researchers post positions."
+                          : "Try adjusting your search or filters."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Right: Detail pane (desktop) */}
+            <div className="hidden lg:block flex-1">
+              <div className="sticky top-24">
+                {selectedListing ? (
+                  <DetailPane
+                    listing={selectedListing}
+                    isSaved={savedIds.has(selectedListing.id)}
+                    isApplied={appliedIds.has(selectedListing.id)}
+                    isApplying={applyingIds.has(selectedListing.id)}
+                    applyError={applyError}
+                    applySuccessId={applySuccessId}
+                    isResearcher={isResearcher}
+                    onToggleSave={() => toggleSaved(selectedListing.id)}
+                    onApply={() => handleApply(selectedListing.id)}
+                    showSuccess={showApplySuccess}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-96 rounded-xl border border-dashed border-border">
+                    <FlaskConical className="h-8 w-8 text-muted-foreground mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      Select an opportunity to view details
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile detail sheet */}
+        <Sheet open={mobileDetailOpen} onOpenChange={setMobileDetailOpen}>
+          <SheetContent side="bottom" className="h-[85vh] rounded-t-2xl lg:hidden pt-6">
+            <ScrollArea className="h-full pr-4">
+              {selectedListing && (
+                <DetailPane
+                  listing={selectedListing}
+                  isSaved={savedIds.has(selectedListing.id)}
+                  isApplied={appliedIds.has(selectedListing.id)}
+                  isApplying={applyingIds.has(selectedListing.id)}
+                  applyError={applyError}
+                  applySuccessId={applySuccessId}
+                  isResearcher={isResearcher}
+                  onToggleSave={() => toggleSaved(selectedListing.id)}
+                  onApply={() => handleApply(selectedListing.id)}
+                  showSuccess={showApplySuccess}
+                />
+              )}
+            </ScrollArea>
+          </SheetContent>
+        </Sheet>
+      </PageTransition>
+    </>
+  );
+}
+
+function DetailPane({
+  listing,
+  isSaved,
+  isApplied,
+  isApplying,
+  applyError,
+  applySuccessId,
+  isResearcher,
+  onToggleSave,
+  onApply,
+  showSuccess,
+}: {
+  listing: Listing;
+  isSaved: boolean;
+  isApplied: boolean;
+  isApplying: boolean;
+  applyError: string | null;
+  applySuccessId: string | null;
+  isResearcher: boolean;
+  onToggleSave: () => void;
+  onApply: () => void;
+  showSuccess: boolean;
+}) {
+  const commitment = COMMITMENT_TYPES.find((c) => c.id === listing.commitment);
+  const location = LOCATION_TYPES.find((l) => l.id === listing.location);
+  const category = RESEARCH_CATEGORIES.find((c) => c.id === listing.category);
+
+  return (
+    <motion.div
+      key={listing.id}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="rounded-xl border border-border bg-card p-6"
+    >
+      {/* Header */}
+      <div className="mb-6">
+        <h2 className="text-xl font-bold mb-1">{listing.title}</h2>
+        <p className="text-muted-foreground flex items-center gap-1.5">
+          <Building2 className="h-4 w-4" />
+          {listing.organization}
+        </p>
+      </div>
+
+      {/* Tags */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {commitment && (
+          <Badge className={cn("text-xs", commitment.color)}>
+            {commitment.label}
+          </Badge>
+        )}
+        {location && (
+          <Badge variant="secondary" className="text-xs">
+            <MapPin className="h-3 w-3 mr-1" />
+            {location.label}
+          </Badge>
+        )}
+        <Badge variant="secondary" className="text-xs">
+          <Clock className="h-3 w-3 mr-1" />
+          {listing.hours} hrs/week
+        </Badge>
+        {category && (
+          <Badge variant="secondary" className="text-xs">
+            {category.name}
+          </Badge>
+        )}
+        <Badge
+          variant="secondary"
+          className={`text-xs ${listing.payType === "hourly" ? "bg-emerald/10 text-emerald" : ""}`}
+        >
+          {listing.payType === "hourly" ? `$${listing.hourlyPay}/hr` : "Unpaid"}
+        </Badge>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-3 mb-6">
+        {isResearcher ? (
+          <Button disabled className="flex-1 h-10">
+            <Building2 className="h-4 w-4 mr-2" />
+            View Only
+          </Button>
+        ) : isApplied ? (
+          <Button disabled className="flex-1 h-10">
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Applied
+          </Button>
+        ) : (
+          <Button onClick={onApply} disabled={isApplying} className="flex-1 h-10">
+            {isApplying ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4 mr-2" />
+            )}
+            {isApplying ? "Applying..." : "Easy Apply"}
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onToggleSave}
+          className="h-10 w-10"
+        >
+          {isSaved ? (
+            <BookmarkCheck className="h-4 w-4 text-primary" />
+          ) : (
+            <Bookmark className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+
+      {/* Error message */}
+      {applyError && applySuccessId === null && !isApplied && (
+        <div className="mb-6 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
+          <X className="h-4 w-4 flex-shrink-0" />
+          {applyError}
+        </div>
+      )}
+
+      {/* Success message */}
+      <AnimatePresence>
+        {showSuccess && applySuccessId === listing.id && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-6 p-3 rounded-lg bg-emerald/10 border border-emerald/20 text-emerald text-sm flex items-center gap-2"
+          >
+            <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+            Application submitted! You&apos;ll hear back soon.
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <Separator className="mb-6" />
+
+      {/* Description */}
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-sm font-semibold mb-2">Description</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {listing.description}
+          </p>
+        </div>
+
+        {listing.responsibilities.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Responsibilities</h3>
+            <ul className="space-y-1.5">
+              {listing.responsibilities.map((r) => (
+                <li
+                  key={r}
+                  className="text-sm text-muted-foreground flex items-start gap-2"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+                  {r}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {listing.skills.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Required Skills</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {listing.skills.map((skill) => (
+                <Badge key={skill} variant="outline" className="text-xs">
+                  {skill}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {listing.researchArea && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Research Area</h3>
+            <p className="text-sm text-muted-foreground">{listing.researchArea}</p>
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Posted {listing.posted}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
