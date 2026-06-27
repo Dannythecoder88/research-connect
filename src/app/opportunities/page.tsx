@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   FlaskConical,
   Lock,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +53,8 @@ type Listing = {
   responsibilities: string[];
   skills: string[];
   researchArea: string;
+  payType: "unpaid" | "hourly";
+  hourlyPay: number | null;
 };
 
 export default function OpportunitiesPage() {
@@ -70,21 +73,70 @@ function OpportunitiesContent() {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [showApplySuccess, setShowApplySuccess] = useState(false);
+  const [applySuccessId, setApplySuccessId] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyingIds, setApplyingIds] = useState<Set<string>>(new Set());
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [selectedCommitments, setSelectedCommitments] = useState<Set<string>>(new Set());
   const [selectedLocations, setSelectedLocations] = useState<Set<string>>(new Set());
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // Check auth state
+  // Check auth state and role
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
+    async function loadAuth() {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      setUser(authUser);
+      if (authUser) {
+        const { data: userRecord } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", authUser.id)
+          .single();
+        setUserRole(userRecord?.role || null);
+      }
       setAuthLoading(false);
-    });
+    }
+    loadAuth();
   }, []);
+
+  // Fetch saved listings and existing applications for this student
+  useEffect(() => {
+    if (!user) return;
+    const userId = user.id;
+    async function fetchUserData() {
+      const supabase = createClient();
+      const { data: studentProfile } = await supabase
+        .from("student_profiles")
+        .select("id")
+        .eq("user_id", userId)
+        .single();
+
+      if (!studentProfile) return;
+
+      const { data: applications } = await supabase
+        .from("applications")
+        .select("listing_id")
+        .eq("student_id", studentProfile.id);
+
+      if (applications) {
+        setAppliedIds(new Set(applications.map((a) => a.listing_id)));
+      }
+
+      const { data: saved } = await supabase
+        .from("saved_listings")
+        .select("listing_id")
+        .eq("student_id", studentProfile.id);
+
+      if (saved) {
+        setSavedIds(new Set(saved.map((s) => s.listing_id)));
+      }
+    }
+    fetchUserData();
+  }, [user]);
 
   // Initialize category filter from URL params (for smart category boxes)
   useEffect(() => {
@@ -93,6 +145,18 @@ function OpportunitiesContent() {
       setSelectedCategories(new Set([categoryParam]));
     }
   }, [searchParams]);
+
+  // Pre-select a specific listing from URL param (e.g., from dashboard "View Position")
+  useEffect(() => {
+    const listingParam = searchParams.get("listing");
+    if (listingParam && listings.length > 0) {
+      const listing = listings.find((l) => l.id === listingParam);
+      if (listing) {
+        setSelectedListing(listing);
+        setMobileDetailOpen(true);
+      }
+    }
+  }, [searchParams, listings]);
 
   // Fetch listings from Supabase
   useEffect(() => {
@@ -122,6 +186,8 @@ function OpportunitiesContent() {
           responsibilities: item.responsibilities || [],
           skills: item.required_skills || [],
           researchArea: item.research_area || "",
+          payType: item.pay_type || "unpaid",
+          hourlyPay: item.hourly_pay || null,
         }));
         setListings(mapped);
       }
@@ -139,11 +205,66 @@ function OpportunitiesContent() {
     });
   };
 
-  const handleApply = (id: string) => {
-    if (!user) return;
+  const isResearcher = userRole === "researcher";
+
+  const handleApply = async (id: string) => {
+    if (!user || isResearcher) return;
+    setApplyError(null);
+    setApplySuccessId(null);
+    setApplyingIds((prev) => new Set(prev).add(id));
+
+    const supabase = createClient();
+
+    const { data: studentProfile } = await supabase
+      .from("student_profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .single();
+
+    if (!studentProfile) {
+      setApplyingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setApplyError("Please complete your student profile before applying.");
+      return;
+    }
+
+    const { error: applyError } = await supabase.from("applications").insert({
+      student_id: studentProfile.id,
+      listing_id: id,
+    });
+
+    setApplyingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    if (applyError) {
+      // Duplicate application - treat as already applied
+      if (applyError.message?.toLowerCase().includes("duplicate") || applyError.code === "23505") {
+        setAppliedIds((prev) => new Set(prev).add(id));
+        setApplySuccessId(id);
+        setShowApplySuccess(true);
+        setTimeout(() => {
+          setShowApplySuccess(false);
+          setApplySuccessId(null);
+        }, 3000);
+        return;
+      }
+      setApplyError(applyError.message);
+      return;
+    }
+
     setAppliedIds((prev) => new Set(prev).add(id));
+    setApplySuccessId(id);
     setShowApplySuccess(true);
-    setTimeout(() => setShowApplySuccess(false), 3000);
+    setTimeout(() => {
+      setShowApplySuccess(false);
+      setApplySuccessId(null);
+    }, 3000);
   };
 
   const toggleFilter = (
@@ -455,6 +576,12 @@ function OpportunitiesContent() {
                                 <Clock className="h-2.5 w-2.5 mr-0.5" />
                                 {listing.hours} hrs
                               </Badge>
+                              <Badge
+                                variant="secondary"
+                                className={`text-[10px] ${listing.payType === "hourly" ? "bg-emerald/10 text-emerald" : "bg-muted"}`}
+                              >
+                                {listing.payType === "hourly" ? `$${listing.hourlyPay}/hr` : "Unpaid"}
+                              </Badge>
                             </div>
 
                             <p className="text-[11px] text-muted-foreground mt-2">
@@ -516,6 +643,10 @@ function OpportunitiesContent() {
                     listing={selectedListing}
                     isSaved={savedIds.has(selectedListing.id)}
                     isApplied={appliedIds.has(selectedListing.id)}
+                    isApplying={applyingIds.has(selectedListing.id)}
+                    applyError={applyError}
+                    applySuccessId={applySuccessId}
+                    isResearcher={isResearcher}
                     onToggleSave={() => toggleSaved(selectedListing.id)}
                     onApply={() => handleApply(selectedListing.id)}
                     showSuccess={showApplySuccess}
@@ -542,6 +673,10 @@ function OpportunitiesContent() {
                   listing={selectedListing}
                   isSaved={savedIds.has(selectedListing.id)}
                   isApplied={appliedIds.has(selectedListing.id)}
+                  isApplying={applyingIds.has(selectedListing.id)}
+                  applyError={applyError}
+                  applySuccessId={applySuccessId}
+                  isResearcher={isResearcher}
                   onToggleSave={() => toggleSaved(selectedListing.id)}
                   onApply={() => handleApply(selectedListing.id)}
                   showSuccess={showApplySuccess}
@@ -559,6 +694,10 @@ function DetailPane({
   listing,
   isSaved,
   isApplied,
+  isApplying,
+  applyError,
+  applySuccessId,
+  isResearcher,
   onToggleSave,
   onApply,
   showSuccess,
@@ -566,6 +705,10 @@ function DetailPane({
   listing: Listing;
   isSaved: boolean;
   isApplied: boolean;
+  isApplying: boolean;
+  applyError: string | null;
+  applySuccessId: string | null;
+  isResearcher: boolean;
   onToggleSave: () => void;
   onApply: () => void;
   showSuccess: boolean;
@@ -613,19 +756,34 @@ function DetailPane({
             {category.name}
           </Badge>
         )}
+        <Badge
+          variant="secondary"
+          className={`text-xs ${listing.payType === "hourly" ? "bg-emerald/10 text-emerald" : ""}`}
+        >
+          {listing.payType === "hourly" ? `$${listing.hourlyPay}/hr` : "Unpaid"}
+        </Badge>
       </div>
 
       {/* Actions */}
       <div className="flex gap-3 mb-6">
-        {isApplied ? (
+        {isResearcher ? (
+          <Button disabled className="flex-1 h-10">
+            <Building2 className="h-4 w-4 mr-2" />
+            View Only
+          </Button>
+        ) : isApplied ? (
           <Button disabled className="flex-1 h-10">
             <CheckCircle2 className="h-4 w-4 mr-2" />
             Applied
           </Button>
         ) : (
-          <Button onClick={onApply} className="flex-1 h-10">
-            <Send className="h-4 w-4 mr-2" />
-            Easy Apply
+          <Button onClick={onApply} disabled={isApplying} className="flex-1 h-10">
+            {isApplying ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4 mr-2" />
+            )}
+            {isApplying ? "Applying..." : "Easy Apply"}
           </Button>
         )}
         <Button
@@ -642,9 +800,17 @@ function DetailPane({
         </Button>
       </div>
 
+      {/* Error message */}
+      {applyError && applySuccessId === null && !isApplied && (
+        <div className="mb-6 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
+          <X className="h-4 w-4 flex-shrink-0" />
+          {applyError}
+        </div>
+      )}
+
       {/* Success message */}
       <AnimatePresence>
-        {showSuccess && (
+        {showSuccess && applySuccessId === listing.id && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}

@@ -9,6 +9,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Trash2,
 } from "lucide-react";
 import { Navbar } from "@/components/navbar";
 import { PageTransition, FadeIn } from "@/components/motion";
@@ -17,6 +18,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -42,6 +52,8 @@ export default function PostPositionPage() {
 function PostPositionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const listingId = searchParams.get("edit");
+  const isEdit = Boolean(listingId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [responsibilities, setResponsibilities] = useState("");
@@ -51,9 +63,14 @@ function PostPositionContent() {
   const [locationType, setLocationType] = useState("");
   const [weeklyHours, setWeeklyHours] = useState("");
   const [researchArea, setResearchArea] = useState("");
+  const [payType, setPayType] = useState<"unpaid" | "hourly">("unpaid");
+  const [hourlyPay, setHourlyPay] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(isEdit);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Pre-fill category from URL params (from smart category boxes)
   useEffect(() => {
@@ -62,6 +79,39 @@ function PostPositionContent() {
       setCategory(categoryParam);
     }
   }, [searchParams]);
+
+  // Load existing listing when editing
+  useEffect(() => {
+    if (!listingId) return;
+    async function loadListing() {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("research_listings")
+        .select("*")
+        .eq("id", listingId)
+        .single();
+
+      if (error || !data) {
+        setError("Failed to load listing. It may have been deleted or you do not have access.");
+        setPageLoading(false);
+        return;
+      }
+
+      setTitle(data.title);
+      setDescription(data.description);
+      setResponsibilities((data.responsibilities || []).join("\n"));
+      setRequiredSkills((data.required_skills || []).join(", "));
+      setCategory(data.category);
+      setCommitment(data.commitment);
+      setLocationType(data.location);
+      setWeeklyHours(data.weekly_hours || "");
+      setResearchArea(data.research_area || "");
+      setPayType(data.pay_type || "unpaid");
+      setHourlyPay(data.hourly_pay ? String(data.hourly_pay) : "");
+      setPageLoading(false);
+    }
+    loadListing();
+  }, [listingId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,35 +140,66 @@ function PostPositionContent() {
       return;
     }
 
-    const { error: insertError } = await supabase
-      .from("research_listings")
-      .insert({
-        researcher_id: profile.id,
-        title,
-        description,
-        responsibilities: responsibilities
-          .split("\n")
-          .map((r) => r.trim())
-          .filter(Boolean),
-        required_skills: requiredSkills
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        category,
-        commitment,
-        location: locationType,
-        weekly_hours: weeklyHours || null,
-        research_area: researchArea || null,
-      });
+    const payload = {
+      title,
+      description,
+      responsibilities: responsibilities
+        .split("\n")
+        .map((r) => r.trim())
+        .filter(Boolean),
+      required_skills: requiredSkills
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      category,
+      commitment,
+      location: locationType,
+      weekly_hours: weeklyHours || null,
+      research_area: researchArea || null,
+      pay_type: payType,
+      hourly_pay: payType === "hourly" && hourlyPay ? parseFloat(hourlyPay) : null,
+    };
+
+    const { error: saveError } = isEdit
+      ? await supabase
+          .from("research_listings")
+          .update(payload)
+          .eq("id", listingId)
+      : await supabase
+          .from("research_listings")
+          .insert({
+            researcher_id: profile.id,
+            ...payload,
+          });
 
     setLoading(false);
 
-    if (insertError) {
-      setError(insertError.message || "Failed to post position. Please try again.");
+    if (saveError) {
+      setError(saveError.message || `Failed to ${isEdit ? "update" : "post"} position. Please try again.`);
       return;
     }
 
     setSuccess(true);
+  };
+
+  const handleDelete = async () => {
+    if (!listingId) return;
+    setDeleting(true);
+    const supabase = createClient();
+    const { error: deleteError } = await supabase
+      .from("research_listings")
+      .delete()
+      .eq("id", listingId);
+
+    setDeleting(false);
+    setDeleteDialogOpen(false);
+
+    if (deleteError) {
+      setError(deleteError.message || "Failed to delete position. Please try again.");
+      return;
+    }
+
+    router.push("/dashboard/researcher");
   };
 
   if (success) {
@@ -130,18 +211,23 @@ function PostPositionContent() {
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald/10 mx-auto mb-6">
               <CheckCircle2 className="h-8 w-8 text-emerald" />
             </div>
-            <h1 className="text-2xl font-bold mb-2">Position Posted!</h1>
+            <h1 className="text-2xl font-bold mb-2">
+              {isEdit ? "Position Updated!" : "Position Posted!"}
+            </h1>
             <p className="text-muted-foreground mb-6">
-              Your research position has been published. Students can now discover
-              and apply to it.
+              {isEdit
+                ? "Your research position has been updated."
+                : "Your research position has been published. Students can now discover and apply to it."}
             </p>
             <div className="flex gap-3 justify-center">
               <Button asChild variant="outline">
                 <Link href="/dashboard/researcher">Back to Dashboard</Link>
               </Button>
-              <Button onClick={() => { setSuccess(false); setTitle(""); setDescription(""); setResponsibilities(""); setRequiredSkills(""); setCategory(""); setCommitment(""); setLocationType(""); setWeeklyHours(""); setResearchArea(""); }}>
-                Post Another
-              </Button>
+              {!isEdit && (
+                <Button onClick={() => { setSuccess(false); setTitle(""); setDescription(""); setResponsibilities(""); setRequiredSkills(""); setCategory(""); setCommitment(""); setLocationType(""); setWeeklyHours(""); setResearchArea(""); }}>
+                  Post Another
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -161,13 +247,24 @@ function PostPositionContent() {
                 Back to Dashboard
               </Link>
             </Button>
-            <h1 className="text-2xl font-bold">Post a Research Position</h1>
+            <h1 className="text-2xl font-bold">
+              {isEdit ? "Edit Research Position" : "Post a Research Position"}
+            </h1>
             <p className="text-muted-foreground mt-1">
-              Describe the role to attract the right students.
+              {isEdit
+                ? "Update the details of your posted position."
+                : "Describe the role to attract the right students."}
             </p>
           </FadeIn>
 
-          {error && (
+          {pageLoading && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
+              <p className="text-sm text-muted-foreground">Loading position...</p>
+            </div>
+          )}
+
+          {!pageLoading && error && (
             <FadeIn className="mb-6">
               <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
                 <AlertCircle className="h-5 w-5 flex-shrink-0" />
@@ -176,6 +273,7 @@ function PostPositionContent() {
             </FadeIn>
           )}
 
+          {!pageLoading && (
           <form onSubmit={handleSubmit} className="space-y-6">
             <FadeIn delay={0.1}>
               <Card>
@@ -311,21 +409,85 @@ function PostPositionContent() {
                       onChange={(e) => setResearchArea(e.target.value)}
                     />
                   </div>
+
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Compensation</Label>
+                      <Select value={payType} onValueChange={(v) => setPayType(v as "unpaid" | "hourly")} required>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select compensation" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unpaid">Unpaid</SelectItem>
+                          <SelectItem value="hourly">Hourly Pay</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {payType === "hourly" && (
+                      <div className="space-y-2">
+                        <Label htmlFor="hourlyPay">Hourly Pay ($)</Label>
+                        <Input
+                          id="hourlyPay"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="e.g., 15.00"
+                          value={hourlyPay}
+                          onChange={(e) => setHourlyPay(e.target.value)}
+                          required={payType === "hourly"}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </FadeIn>
 
-            <div className="flex justify-end">
+            <div className="flex justify-between items-center">
+              {isEdit ? (
+                <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                  <DialogTrigger
+                    render={
+                      <Button type="button" variant="destructive" size="lg" className="gap-2">
+                        <Trash2 className="h-4 w-4" />
+                        Delete Position
+                      </Button>
+                    }
+                  />
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Delete this position?</DialogTitle>
+                      <DialogDescription>
+                        This will permanently remove the position and all associated applications.
+                        This action cannot be undone.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
+                        {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                        {deleting ? "Deleting..." : "Delete"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              ) : (
+                <div />
+              )}
               <Button type="submit" size="lg" className="gap-2" disabled={loading}>
                 {loading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <ArrowRight className="h-4 w-4" />
                 )}
-                {loading ? "Publishing..." : "Publish Position"}
+                {loading ? (isEdit ? "Saving..." : "Publishing...") : (isEdit ? "Save Changes" : "Publish Position")}
               </Button>
             </div>
           </form>
+          )}
         </div>
       </PageTransition>
     </>

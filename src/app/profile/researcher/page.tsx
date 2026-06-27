@@ -65,6 +65,41 @@ export default function ResearcherProfilePage() {
     });
   };
 
+  // Ensure the public.users row exists (fixes accounts created before the trigger existed)
+  const ensureUserRecord = async (
+    supabase: ReturnType<typeof createClient>,
+    authUser: any
+  ): Promise<{ id: string; email: string; full_name: string } | null> => {
+    const meta = authUser.user_metadata || {};
+    const fullName =
+      meta.full_name ||
+      `${meta.first_name || ""} ${meta.last_name || ""}`.trim() ||
+      authUser.email;
+    const role = meta.role || "researcher";
+
+    const { data: existing } = await supabase
+      .from("users")
+      .select("id, email, full_name")
+      .eq("id", authUser.id)
+      .single<{ id: string; email: string; full_name: string }>();
+
+    if (existing) return existing;
+
+    const { data, error } = await supabase
+      .from("users")
+      .insert({
+        id: authUser.id,
+        email: authUser.email,
+        full_name: fullName,
+        role,
+      })
+      .select("id, email, full_name")
+      .single();
+
+    if (error) throw error;
+    return data;
+  };
+
   useEffect(() => {
     async function loadProfile() {
       const supabase = createClient();
@@ -82,15 +117,19 @@ export default function ResearcherProfilePage() {
       // Autofill from auth metadata
       const meta = authUser.user_metadata || {};
 
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("id, email, full_name")
-        .eq("id", authUser.id)
-        .single();
-
-      if (userError) {
+      let userData;
+      try {
+        userData = await ensureUserRecord(supabase, authUser);
+      } catch (err: any) {
+        console.error("ensureUserRecord failed:", err);
         setLoading(false);
-        setError("Failed to load your account information.");
+        setError(`Failed to load your account information: ${err?.message || "Unknown error"}`);
+        return;
+      }
+
+      if (!userData) {
+        setLoading(false);
+        setError("Unable to load your account information.");
         return;
       }
 
@@ -146,14 +185,31 @@ export default function ResearcherProfilePage() {
       return;
     }
 
+    let userData;
+    try {
+      userData = await ensureUserRecord(supabase, authUser);
+    } catch (err: any) {
+      console.error("ensureUserRecord failed on save:", err);
+      setSaving(false);
+      setError(`Failed to prepare your account: ${err?.message || "Unknown error"}`);
+      return;
+    }
+
+    if (!userData) {
+      setSaving(false);
+      setError("Unable to prepare your account for saving.");
+      return;
+    }
+
     const { error: userUpdateError } = await supabase
       .from("users")
       .update({ full_name: leadResearcher || email })
       .eq("id", authUser.id);
 
     if (userUpdateError) {
+      console.error("users update failed:", userUpdateError);
       setSaving(false);
-      setError("Failed to update your name. Please try again.");
+      setError(`Failed to update your name: ${userUpdateError.message}`);
       return;
     }
 
@@ -179,7 +235,8 @@ export default function ResearcherProfilePage() {
     setSaving(false);
 
     if (saveError) {
-      setError("Failed to save your profile. Please try again.");
+      console.error("researcher_profiles save failed:", saveError);
+      setError(`Failed to save your profile: ${saveError.message}`);
       return;
     }
 

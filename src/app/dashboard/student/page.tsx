@@ -7,6 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import Link from "next/link";
 import {
   FileText,
@@ -15,37 +25,206 @@ import {
   User,
   Search,
   Info,
+  MessageSquare,
+  Loader2,
+  Send,
+  Building2,
+  Clock,
+  MapPin,
+  CheckCircle2,
+  XCircle,
+  Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
+const statusLabels: Record<string, string> = {
+  pending: "Pending",
+  under_review: "Under Review",
+  interviewing: "Interviewing",
+  accepted: "Accepted",
+  declined: "Declined",
+};
+
+const statusColors: Record<string, string> = {
+  pending: "bg-amber/10 text-amber",
+  under_review: "bg-blue/10 text-blue",
+  interviewing: "bg-purple/10 text-purple",
+  accepted: "bg-emerald/10 text-emerald",
+  declined: "bg-destructive/10 text-destructive",
+};
+
+type Application = {
+  id: string;
+  status: string;
+  applied_at: string;
+  cover_message?: string;
+  research_listings: {
+    id: string;
+    title: string;
+  }[];
+  lab_name: string;
+};
+
+type SavedListing = {
+  id: string;
+  research_listings: {
+    id: string;
+    title: string;
+    description: string;
+    location: string;
+    weekly_hours: string;
+  }[];
+};
+
+type Message = {
+  id: string;
+  content: string;
+  sender_id: string;
+  created_at: string;
+};
+
 export default function StudentDashboardPage() {
-  // TODO: Fetch real applications from Supabase
-  const applications: never[] = [];
-
-  // TODO: Fetch saved listings from Supabase
-  const savedListings: never[] = [];
-
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [savedListings, setSavedListings] = useState<SavedListing[]>([]);
   const [profileCompletion, setProfileCompletion] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messageText, setMessageText] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [applicationToDelete, setApplicationToDelete] = useState<Application | null>(null);
 
   useEffect(() => {
-    async function loadProfileCompletion() {
+    async function loadDashboard() {
       const supabase = createClient();
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) return;
+      if (!authUser) {
+        setLoading(false);
+        return;
+      }
+      setCurrentUserId(authUser.id);
 
-      const { data: profile } = await supabase
+      const { data: studentProfile } = await supabase
         .from("student_profiles")
-        .select("profile_completion")
+        .select("id, profile_completion")
         .eq("user_id", authUser.id)
         .single();
 
-      if (profile) {
-        setProfileCompletion(profile.profile_completion || 0);
+      if (!studentProfile) {
+        setLoading(false);
+        return;
       }
+
+      setProfileCompletion(studentProfile.profile_completion || 0);
+
+      const [{ data: appsData }, { data: savedData }] = await Promise.all([
+        supabase
+          .from("applications")
+          .select("id, status, applied_at, cover_message, research_listings(id, title, researcher_id)")
+          .eq("student_id", studentProfile.id)
+          .order("applied_at", { ascending: false }),
+        supabase
+          .from("saved_listings")
+          .select("id, research_listings(id, title, description, location, weekly_hours)")
+          .eq("student_id", studentProfile.id)
+          .order("saved_at", { ascending: false }),
+      ]);
+
+      const rawApps = (appsData || []) as any[];
+      const researcherIds = [...new Set(rawApps.map((a) => a.research_listings?.[0]?.researcher_id).filter(Boolean))];
+      let labMap = new Map<string, string>();
+      if (researcherIds.length > 0) {
+        const { data: researchers } = await supabase
+          .from("researcher_profiles")
+          .select("id, lab_name")
+          .in("id", researcherIds);
+        (researchers || []).forEach((r: any) => labMap.set(r.id, r.lab_name));
+      }
+
+      const enrichedApps: Application[] = rawApps.map((a) => ({
+        ...a,
+        lab_name: labMap.get(a.research_listings?.[0]?.researcher_id) || "Unknown Lab",
+      }));
+
+      setApplications(enrichedApps);
+      setSavedListings((savedData as SavedListing[]) || []);
+      setLoading(false);
     }
 
-    loadProfileCompletion();
+    loadDashboard();
   }, []);
+
+  async function loadMessages(applicationId: string) {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("messages")
+      .select("id, content, sender_id, created_at")
+      .eq("application_id", applicationId)
+      .order("created_at", { ascending: true });
+    setMessages(data || []);
+  }
+
+  async function sendMessage() {
+    if (!selectedApplication || !messageText.trim()) return;
+    setSendingMessage(true);
+    setMessageError(null);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSendingMessage(false);
+      setMessageError("You must be signed in to send messages.");
+      return;
+    }
+
+    const { error } = await supabase.from("messages").insert({
+      application_id: selectedApplication.id,
+      sender_id: user.id,
+      content: messageText.trim(),
+    });
+
+    setSendingMessage(false);
+    if (error) {
+      console.error("Failed to send message:", error);
+      setMessageError("Failed to send message. Please make sure the application is accepted.");
+      return;
+    }
+
+    setMessageText("");
+    await loadMessages(selectedApplication.id);
+  }
+
+  const openMessages = (application: Application) => {
+    setSelectedApplication(application);
+    setMessageOpen(true);
+    loadMessages(application.id);
+  };
+
+  const openDeleteDialog = (application: Application) => {
+    setApplicationToDelete(application);
+    setDeleteDialogOpen(true);
+  };
+
+  async function handleDeleteApplication() {
+    if (!applicationToDelete) return;
+    setDeleteLoading(applicationToDelete.id);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("applications")
+      .delete()
+      .eq("id", applicationToDelete.id);
+
+    setDeleteLoading(null);
+    setDeleteDialogOpen(false);
+    if (error) return;
+
+    setApplications((prev) => prev.filter((a) => a.id !== applicationToDelete.id));
+    setApplicationToDelete(null);
+  }
 
   return (
     <>
@@ -56,12 +235,9 @@ export default function StudentDashboardPage() {
           <FadeIn>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  My Dashboard
-                </h1>
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">My Dashboard</h1>
                 <p className="mt-1 text-muted-foreground">
-                  Track your applications, saved opportunities, and profile
-                  progress.
+                  Track your applications, saved opportunities, and profile progress.
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -84,12 +260,9 @@ export default function StudentDashboardPage() {
                     <Info className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">
-                      Welcome to Research Connect!
-                    </p>
+                    <p className="text-sm font-medium">Welcome to Research Connect!</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      Complete your profile and start exploring research
-                      opportunities.
+                      Complete your profile and start exploring research opportunities.
                     </p>
                   </div>
                 </CardContent>
@@ -113,7 +286,7 @@ export default function StudentDashboardPage() {
                   </TabsTrigger>
                 </TabsList>
 
-                {/* Applications Tab - Empty State */}
+                {/* Applications Tab */}
                 <TabsContent value="applications">
                   <div className="mt-4">
                     {applications.length === 0 ? (
@@ -122,12 +295,9 @@ export default function StudentDashboardPage() {
                           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
                             <FileText className="h-7 w-7 text-muted-foreground" />
                           </div>
-                          <h3 className="mt-4 text-lg font-semibold">
-                            No applications yet
-                          </h3>
+                          <h3 className="mt-4 text-lg font-semibold">No applications yet</h3>
                           <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                            Browse research opportunities and apply to get
-                            started.
+                            Browse research opportunities and apply to get started.
                           </p>
                           <Button asChild className="mt-6" size="sm">
                             <Link href="/opportunities">
@@ -138,14 +308,77 @@ export default function StudentDashboardPage() {
                         </CardContent>
                       </Card>
                     ) : (
-                      // TODO: Render real applications here
-                      // applications.map((app) => ( ... ))
-                      <div className="space-y-4" />
+                      <div className="space-y-4">
+                        {applications.map((application) => {
+                          const listing = application.research_listings[0];
+                          const lab = application.lab_name || "Unknown Lab";
+                          return (
+                            <Card key={application.id} className="border border-border/50 shadow-none">
+                              <CardContent className="p-4">
+                                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                  <div>
+                                    <Link
+                                      href={`/opportunities?listing=${listing?.id || ""}`}
+                                      className="font-semibold text-base hover:underline"
+                                    >
+                                      {listing?.title || "Untitled Position"}
+                                    </Link>
+                                    <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                                      <Building2 className="h-3.5 w-3.5" />
+                                      {lab}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      Applied {new Date(application.applied_at).toLocaleDateString("en-US", {
+                                        month: "short", day: "numeric", year: "numeric",
+                                      })}
+                                    </p>
+                                    {application.status === "accepted" && (
+                                      <p className="text-xs text-emerald mt-1 flex items-center gap-1">
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                        You have been approved! Message the professor to discuss next steps.
+                                      </p>
+                                    )}
+                                    {application.status === "declined" && (
+                                      <p className="text-xs text-destructive mt-1 flex items-center gap-1">
+                                        <XCircle className="h-3.5 w-3.5" />
+                                        This application was not selected.
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col items-start sm:items-end gap-2">
+                                    <Badge className={statusColors[application.status] || "bg-muted"}>
+                                      {statusLabels[application.status] || application.status}
+                                    </Badge>
+                                    <div className="flex gap-2">
+                                      {application.status === "accepted" && (
+                                        <Button size="sm" variant="outline" className="gap-1" onClick={() => openMessages(application)}>
+                                          <MessageSquare className="h-3.5 w-3.5" />
+                                          Message
+                                        </Button>
+                                      )}
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
+                                        onClick={() => openDeleteDialog(application)}
+                                        disabled={deleteLoading === application.id}
+                                      >
+                                        {deleteLoading === application.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                        Delete
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 </TabsContent>
 
-                {/* Saved Tab - Empty State */}
+                {/* Saved Tab */}
                 <TabsContent value="saved">
                   <div className="mt-4">
                     {savedListings.length === 0 ? (
@@ -154,12 +387,9 @@ export default function StudentDashboardPage() {
                           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
                             <Bookmark className="h-7 w-7 text-muted-foreground" />
                           </div>
-                          <h3 className="mt-4 text-lg font-semibold">
-                            No saved opportunities
-                          </h3>
+                          <h3 className="mt-4 text-lg font-semibold">No saved opportunities</h3>
                           <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                            Save positions you&apos;re interested in to review
-                            later.
+                            Save positions you&apos;re interested in to review later.
                           </p>
                           <Button asChild className="mt-6" size="sm">
                             <Link href="/opportunities">
@@ -170,9 +400,26 @@ export default function StudentDashboardPage() {
                         </CardContent>
                       </Card>
                     ) : (
-                      // TODO: Render real saved listings here
-                      // savedListings.map((listing) => ( ... ))
-                      <div className="space-y-4" />
+                      <div className="space-y-4">
+                        {savedListings.map((saved) => {
+                          const listing = saved.research_listings[0];
+                          return (
+                            <Card key={saved.id} className="border border-border/50 shadow-none">
+                              <CardContent className="p-4">
+                                <h3 className="font-semibold text-base">{listing?.title || "Untitled Position"}</h3>
+                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{listing?.description}</p>
+                                <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {listing?.location}</span>
+                                  <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {listing?.weekly_hours || "TBD"} hrs/week</span>
+                                </div>
+                                <Button asChild variant="outline" size="sm" className="mt-3">
+                                  <Link href="/opportunities">View Position</Link>
+                                </Button>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 </TabsContent>
@@ -193,24 +440,14 @@ export default function StudentDashboardPage() {
                   <CardContent>
                     <div className="space-y-3">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          {profileCompletion}% complete
-                        </span>
-                        <span className="font-medium text-primary">
-                          {profileCompletion}%
-                        </span>
+                        <span className="text-muted-foreground">{profileCompletion}% complete</span>
+                        <span className="font-medium text-primary">{profileCompletion}%</span>
                       </div>
                       <Progress value={profileCompletion} />
                       <p className="text-xs text-muted-foreground">
-                        Complete your profile to start applying for research
-                        opportunities.
+                        Complete your profile to start applying for research opportunities.
                       </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full"
-                        asChild
-                      >
+                      <Button variant="outline" size="sm" className="w-full" asChild>
                         <Link href="/profile/student">
                           Complete Your Profile
                           <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
@@ -224,6 +461,88 @@ export default function StudentDashboardPage() {
           </div>
         </main>
       </PageTransition>
+
+      {/* Delete Application Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete application?</DialogTitle>
+            <DialogDescription>
+              This will remove your application for{" "}
+              <span className="font-medium text-foreground">
+                {applicationToDelete?.research_listings[0]?.title || "this position"}
+              </span>
+              . You can apply again later if you change your mind.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDeleteApplication}
+              disabled={deleteLoading === applicationToDelete?.id}
+            >
+              {deleteLoading === applicationToDelete?.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Messages Dialog */}
+      <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Message {selectedApplication?.lab_name || "Professor"}
+            </DialogTitle>
+            <DialogDescription>
+              Position: {selectedApplication?.research_listings[0]?.title || "Untitled Position"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <ScrollArea className="h-64 rounded-lg border p-3">
+              {messages.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No messages yet. Start the conversation below.</p>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((msg) => {
+                    const isMe = msg.sender_id === currentUserId;
+                    return (
+                      <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${isMe ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                          <p>{msg.content}</p>
+                          <p className="text-[10px] opacity-70 mt-1">
+                            {new Date(msg.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "numeric" })}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+            {messageError && (
+              <p className="text-xs text-destructive">{messageError}</p>
+            )}
+            <div className="flex gap-2">
+              <Textarea
+                placeholder="Type a message..."
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                rows={2}
+                className="min-h-[60px]"
+              />
+              <Button onClick={sendMessage} disabled={sendingMessage || !messageText.trim()} className="self-end">
+                {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

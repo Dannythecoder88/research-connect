@@ -1,10 +1,11 @@
 -- =============================================
--- FIX: Replace the broken handle_new_user trigger and backfill existing users
--- Run this in Supabase SQL Editor:
--- https://supabase.com/dashboard/project/ieznkgihqhoxoowtqiro/sql
+-- MIGRATION: Fix profile save for existing and new accounts
+-- Run this in your Supabase SQL Editor:
+-- https://supabase.com/dashboard/project/YOUR_PROJECT/sql
 -- =============================================
 
--- 1. Allow users to create their own public.users row from the client (fallback)
+-- 1. Allow users to create their own public.users row from the client
+-- (this is needed if the trigger failed to create it during signup)
 DROP POLICY IF EXISTS "Users can insert own record" ON public.users;
 CREATE POLICY "Users can insert own record" ON public.users
   FOR INSERT WITH CHECK (auth.uid() = id);
@@ -75,7 +76,7 @@ BEGIN
   END IF;
 END $$;
 
--- 6. Ensure student profile completion function and trigger exist
+-- 6. Ensure student profile completion calculation function and trigger exist
 CREATE OR REPLACE FUNCTION calculate_profile_completion(profile_id UUID)
 RETURNS INTEGER AS $$
 DECLARE
@@ -111,7 +112,7 @@ CREATE TRIGGER update_student_profile_completion
   BEFORE INSERT OR UPDATE ON public.student_profiles
   FOR EACH ROW EXECUTE FUNCTION sync_student_profile_completion();
 
--- 7. Ensure researcher profile completion function and trigger exist
+-- 7. Ensure researcher profile completion calculation function and trigger exist
 CREATE OR REPLACE FUNCTION calculate_researcher_profile_completion(profile_id UUID)
 RETURNS INTEGER AS $$
 DECLARE
@@ -146,7 +147,7 @@ CREATE TRIGGER update_researcher_profile_completion
   BEFORE INSERT OR UPDATE ON public.researcher_profiles
   FOR EACH ROW EXECUTE FUNCTION sync_researcher_profile_completion();
 
--- 8. Recalculate completion for existing profiles
+-- 8. Recalculate completion for any existing profiles
 UPDATE public.student_profiles
 SET profile_completion = calculate_profile_completion(id)
 WHERE profile_completion IS NULL OR profile_completion = 0;
@@ -155,9 +156,7 @@ UPDATE public.researcher_profiles
 SET profile_completion = calculate_researcher_profile_completion(id)
 WHERE profile_completion IS NULL OR profile_completion = 0;
 
--- 9. Drop the existing trigger and recreate the function with safer, idempotent logic
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-
+-- 9. Make the trigger idempotent so it never fails on duplicate rows
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -212,7 +211,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Recreate the trigger
+-- Make sure the trigger is attached
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();

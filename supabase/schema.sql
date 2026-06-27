@@ -14,6 +14,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TYPE user_role AS ENUM ('student', 'researcher', 'admin');
 CREATE TYPE application_status AS ENUM ('pending', 'under_review', 'interviewing', 'accepted', 'declined');
 CREATE TYPE listing_status AS ENUM ('active', 'paused', 'closed', 'pending_review');
+CREATE TYPE pay_type AS ENUM ('unpaid', 'hourly');
 CREATE TYPE commitment_type AS ENUM ('summer', 'school_year', 'project', 'semester', 'ongoing');
 CREATE TYPE location_type AS ENUM ('virtual', 'hybrid', 'in_person');
 CREATE TYPE verification_status AS ENUM ('pending', 'verified', 'rejected');
@@ -94,6 +95,8 @@ CREATE TABLE public.research_listings (
   location location_type NOT NULL,
   weekly_hours TEXT,
   research_area TEXT,
+  pay_type pay_type NOT NULL DEFAULT 'unpaid',
+  hourly_pay NUMERIC(10, 2),
   status listing_status NOT NULL DEFAULT 'active',
   posted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -146,6 +149,21 @@ CREATE TABLE public.notifications (
   link TEXT, -- Optional link to relevant page
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ===========================================
+-- MESSAGES (chat tied to accepted applications)
+-- ===========================================
+
+CREATE TABLE public.messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  application_id UUID NOT NULL REFERENCES public.applications(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_messages_application ON public.messages(application_id);
+CREATE INDEX idx_messages_created_at ON public.messages(application_id, created_at DESC);
 
 -- ===========================================
 -- RESOURCES
@@ -240,6 +258,7 @@ ALTER TABLE public.research_listings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.saved_listings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.faqs ENABLE ROW LEVEL SECURITY;
 
@@ -251,6 +270,10 @@ CREATE POLICY "Users are viewable by everyone" ON public.users
 -- Users can update their own record
 CREATE POLICY "Users can update own record" ON public.users
   FOR UPDATE USING (auth.uid() = id);
+
+-- Users can insert their own record (fallback when the trigger fails to create one)
+CREATE POLICY "Users can insert own record" ON public.users
+  FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- ---- STUDENT PROFILES ----
 -- Viewable by the student themselves, researchers, and admins
@@ -278,11 +301,44 @@ CREATE POLICY "Researchers can insert own profile" ON public.researcher_profiles
 CREATE POLICY "Researchers can update own profile" ON public.researcher_profiles
   FOR UPDATE USING (auth.uid() = user_id);
 
+-- SECURITY DEFINER helper: researcher IDs the current student has applied to
+CREATE OR REPLACE FUNCTION get_student_applied_researcher_ids()
+RETURNS SETOF UUID AS $$
+BEGIN
+  RETURN QUERY
+  SELECT rl.researcher_id FROM public.research_listings rl
+  JOIN public.applications a ON rl.id = a.listing_id
+  WHERE a.student_id IN (SELECT id FROM public.student_profiles WHERE user_id = auth.uid());
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Students can see researcher profiles of listings they applied to
+CREATE POLICY "Students can see researcher profiles of applied listings" ON public.researcher_profiles
+  FOR SELECT USING (
+    id IN (SELECT get_student_applied_researcher_ids())
+  );
+
 -- ---- RESEARCH LISTINGS ----
 -- Active listings visible to everyone
 CREATE POLICY "Active listings are public" ON public.research_listings
   FOR SELECT USING (status = 'active' OR
     researcher_id IN (SELECT id FROM public.researcher_profiles WHERE user_id = auth.uid()));
+
+-- SECURITY DEFINER helper: listing IDs the current student has applied to
+CREATE OR REPLACE FUNCTION get_student_applied_listing_ids()
+RETURNS SETOF UUID AS $$
+BEGIN
+  RETURN QUERY
+  SELECT a.listing_id FROM public.applications a
+  WHERE a.student_id IN (SELECT id FROM public.student_profiles WHERE user_id = auth.uid());
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Students can see listings they applied to, even if closed
+CREATE POLICY "Students can see listings they applied to" ON public.research_listings
+  FOR SELECT USING (
+    id IN (SELECT get_student_applied_listing_ids())
+  );
 
 -- Researchers can insert listings
 CREATE POLICY "Researchers can create listings" ON public.research_listings
@@ -326,6 +382,36 @@ CREATE POLICY "Researchers can update application status" ON public.applications
       JOIN public.researcher_profiles rp ON rl.researcher_id = rp.id
       WHERE rp.user_id = auth.uid()
     )
+  );
+
+-- Helper function to check if current user is a participant of an accepted application
+-- SECURITY DEFINER so it can read applications/listings without RLS blocking nested joins.
+CREATE OR REPLACE FUNCTION is_application_participant(app_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.applications a
+    JOIN public.research_listings rl ON a.listing_id = rl.id
+    WHERE a.id = app_id
+      AND a.status = 'accepted'
+      AND (
+        a.student_id IN (SELECT id FROM public.student_profiles WHERE user_id = auth.uid())
+        OR rl.researcher_id IN (SELECT id FROM public.researcher_profiles WHERE user_id = auth.uid())
+      )
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ---- MESSAGES ----
+-- Participants (student + researcher) can read messages for accepted applications
+CREATE POLICY "Participants can read messages" ON public.messages
+  FOR SELECT USING (is_application_participant(application_id));
+
+-- Participants can send messages for accepted applications they belong to
+CREATE POLICY "Participants can send messages" ON public.messages
+  FOR INSERT WITH CHECK (
+    sender_id = auth.uid()
+    AND is_application_participant(application_id)
   );
 
 -- ---- SAVED LISTINGS ----
@@ -444,7 +530,8 @@ BEGIN
   );
 
   INSERT INTO public.users (id, email, full_name, role)
-  VALUES (NEW.id, NEW.email, full_name_val, user_role_val);
+  VALUES (NEW.id, NEW.email, full_name_val, user_role_val)
+  ON CONFLICT (id) DO NOTHING;
 
   -- Create student profile with signup data so it can be pre-filled on the profile page
   IF user_role_val = 'student' THEN
@@ -460,7 +547,8 @@ BEGIN
       NULLIF(NEW.raw_user_meta_data->>'grad_year', '')::INTEGER,
       NULLIF(NEW.raw_user_meta_data->>'location', ''),
       NULLIF(NEW.raw_user_meta_data->>'phone', '')
-    );
+    )
+    ON CONFLICT (user_id) DO NOTHING;
   END IF;
 
   -- Create researcher profile with signup data so it can be pre-filled on the profile page
@@ -481,7 +569,8 @@ BEGIN
       NULLIF(NEW.raw_user_meta_data->>'website', ''),
       NULLIF(NEW.raw_user_meta_data->>'description', ''),
       full_name_val
-    );
+    )
+    ON CONFLICT (user_id) DO NOTHING;
   END IF;
 
   RETURN NEW;
@@ -489,7 +578,8 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Trigger to auto-create user record on auth sign up
-CREATE OR REPLACE TRIGGER on_auth_user_created
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 

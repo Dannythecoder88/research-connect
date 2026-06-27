@@ -104,6 +104,41 @@ export default function StudentProfilePage() {
     });
   };
 
+  // Ensure the public.users row exists (fixes accounts created before the trigger existed)
+  const ensureUserRecord = async (
+    supabase: ReturnType<typeof createClient>,
+    authUser: any
+  ): Promise<{ id: string; email: string; full_name: string } | null> => {
+    const meta = authUser.user_metadata || {};
+    const fullName =
+      meta.full_name ||
+      `${meta.first_name || ""} ${meta.last_name || ""}`.trim() ||
+      authUser.email;
+    const role = meta.role || "student";
+
+    const { data: existing } = await supabase
+      .from("users")
+      .select("id, email, full_name")
+      .eq("id", authUser.id)
+      .single<{ id: string; email: string; full_name: string }>();
+
+    if (existing) return existing;
+
+    const { data, error } = await supabase
+      .from("users")
+      .insert({
+        id: authUser.id,
+        email: authUser.email,
+        full_name: fullName,
+        role,
+      })
+      .select("id, email, full_name")
+      .single();
+
+    if (error) throw error;
+    return data;
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -168,20 +203,24 @@ export default function StudentProfilePage() {
       const metaLastName = meta.last_name || "";
       const metaFullName = meta.full_name || "";
 
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("id, email, full_name")
-        .eq("id", authUser.id)
-        .single();
-
-      if (userError) {
+      let userData;
+      try {
+        userData = await ensureUserRecord(supabase, authUser);
+      } catch (err: any) {
+        console.error("ensureUserRecord failed:", err);
         setLoading(false);
-        setError("Failed to load your account information.");
+        setError(`Failed to load your account information: ${err?.message || "Unknown error"}`);
+        return;
+      }
+
+      if (!userData) {
+        setLoading(false);
+        setError("Unable to load your account information.");
         return;
       }
 
       // Use profile data first, then fall back to signup metadata
-      const nameParts = (userData.full_name || "").split(" ");
+      const nameParts = ((userData.full_name || metaFullName) || "").split(" ");
       setFirstName(metaFirstName || nameParts[0] || "");
       setLastName(metaLastName || nameParts.slice(1).join(" ") || "");
       setEmail(userData.email || authUser.email || "");
@@ -236,6 +275,22 @@ export default function StudentProfilePage() {
       return;
     }
 
+    let userData;
+    try {
+      userData = await ensureUserRecord(supabase, authUser);
+    } catch (err: any) {
+      console.error("ensureUserRecord failed on save:", err);
+      setSaving(false);
+      setError(`Failed to prepare your account: ${err?.message || "Unknown error"}`);
+      return;
+    }
+
+    if (!userData) {
+      setSaving(false);
+      setError("Unable to prepare your account for saving.");
+      return;
+    }
+
     const fullName = `${firstName} ${lastName}`.trim();
 
     const { error: userUpdateError } = await supabase
@@ -244,8 +299,9 @@ export default function StudentProfilePage() {
       .eq("id", authUser.id);
 
     if (userUpdateError) {
+      console.error("users update failed:", userUpdateError);
       setSaving(false);
-      setError("Failed to update your name. Please try again.");
+      setError(`Failed to update your name: ${userUpdateError.message}`);
       return;
     }
 
@@ -271,7 +327,8 @@ export default function StudentProfilePage() {
     setSaving(false);
 
     if (saveError) {
-      setError("Failed to save your profile. Please try again.");
+      console.error("student_profiles save failed:", saveError);
+      setError(`Failed to save your profile: ${saveError.message}`);
       return;
     }
 
