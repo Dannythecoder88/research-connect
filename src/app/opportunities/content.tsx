@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   SlidersHorizontal,
   FlaskConical,
-  Lock,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -303,9 +302,6 @@ export default function OpportunitiesContent({
   const getLocation = (id: string) =>
     LOCATION_TYPES.find((l) => l.id === id);
 
-  // For unauthenticated users, show top 3 fully, blur the rest
-  const isGuest = !authLoading && !user;
-  const GUEST_VISIBLE_COUNT = 3;
 
   const FilterPanel = () => (
     <div className="space-y-6">
@@ -479,9 +475,7 @@ export default function OpportunitiesContent({
               <ScrollArea className="h-[calc(100vh-12rem)]">
                 <div className="space-y-3 pr-2">
                   <AnimatePresence mode="popLayout">
-                    {filteredListings.map((listing, index) => {
-                      const isBlurred = isGuest && index >= GUEST_VISIBLE_COUNT;
-
+                    {filteredListings.map((listing) => {
                       return (
                         <motion.div
                           key={listing.id}
@@ -496,26 +490,17 @@ export default function OpportunitiesContent({
                             role="button"
                             tabIndex={0}
                             onClick={() => {
-                              if (isGuest) {
-                                window.location.href = "/auth/signup";
-                                return;
-                              }
                               setSelectedListing(listing);
                               setMobileDetailOpen(true);
                             }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
-                                if (isGuest) {
-                                  window.location.href = "/auth/signup";
-                                  return;
-                                }
                                 setSelectedListing(listing);
                                 setMobileDetailOpen(true);
                               }
                             }}
                             className={cn(
                               "w-full text-left p-4 rounded-xl border transition-all cursor-pointer",
-                              isBlurred && "blur-[6px] select-none pointer-events-none",
                               selectedListing?.id === listing.id
                                 ? "border-primary bg-primary/5 shadow-sm"
                                 : "border-border bg-card hover:border-primary/30 hover:shadow-sm"
@@ -585,36 +570,10 @@ export default function OpportunitiesContent({
                             </p>
                           </div>
 
-                          {/* Overlay for blurred cards to capture clicks */}
-                          {isBlurred && (
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => { window.location.href = "/auth/signup"; }}
-                              onKeyDown={(e) => { if (e.key === "Enter") window.location.href = "/auth/signup"; }}
-                              className="absolute inset-0 cursor-pointer z-10"
-                            />
-                          )}
                         </motion.div>
                       );
                     })}
                   </AnimatePresence>
-
-                  {/* Guest sign-up prompt over blurred listings */}
-                  {isGuest && filteredListings.length > GUEST_VISIBLE_COUNT && (
-                    <div className="relative -mt-16 pt-20 pb-6 text-center bg-gradient-to-t from-background via-background/95 to-transparent">
-                      <Lock className="h-6 w-6 text-muted-foreground mx-auto mb-3" />
-                      <p className="text-sm font-medium mb-1">
-                        Sign up to unlock all positions
-                      </p>
-                      <p className="text-xs text-muted-foreground mb-4 max-w-xs mx-auto">
-                        Sign up or log in for free to unlock access to dozens of local research positions.
-                      </p>
-                      <Button asChild size="sm">
-                        <Link href="/auth/signup">Create Free Account</Link>
-                      </Button>
-                    </div>
-                  )}
 
                   {filteredListings.length === 0 && (
                     <div className="text-center py-16">
@@ -838,9 +797,9 @@ function DetailPane({
           <div>
             <h3 className="text-sm font-semibold mb-2">Responsibilities</h3>
             <ul className="space-y-1.5">
-              {listing.responsibilities.map((r) => (
+              {listing.responsibilities.map((r, i) => (
                 <li
-                  key={r}
+                  key={i}
                   className="text-sm text-muted-foreground flex items-start gap-2"
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
@@ -855,8 +814,8 @@ function DetailPane({
           <div>
             <h3 className="text-sm font-semibold mb-2">Required Skills</h3>
             <div className="flex flex-wrap gap-1.5">
-              {listing.skills.map((skill) => (
-                <Badge key={skill} variant="outline" className="text-xs">
+              {listing.skills.map((skill, i) => (
+                <Badge key={i} variant="outline" className="text-xs">
                   {skill}
                 </Badge>
               ))}

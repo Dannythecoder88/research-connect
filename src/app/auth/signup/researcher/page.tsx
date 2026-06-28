@@ -51,31 +51,40 @@ export default function ResearcherSignUpPage() {
     setLoading(true);
     setError("");
 
-    const supabase = createClient();
-    const { error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard/researcher`,
-        data: {
-          role: "researcher",
-          full_name: name,
-          lab_name: labName,
-          affiliation,
-          website,
-          description,
+    try {
+      const supabase = createClient();
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard/researcher`,
+          data: {
+            role: "researcher",
+            full_name: name,
+            lab_name: labName,
+            affiliation,
+            website,
+            description,
+          },
         },
-      },
-    });
+      });
 
-    setLoading(false);
+      if (signUpError) {
+        console.error("Supabase signup error:", JSON.stringify(signUpError));
+        const msg = typeof signUpError.message === "string" && signUpError.message.length > 0 && signUpError.message !== "{}"
+          ? signUpError.message
+          : "Registration failed. Please check your details and try again.";
+        setError(msg);
+        return;
+      }
 
-    if (signUpError) {
-      setError(signUpError.message);
-      return;
+      setSuccess(true);
+    } catch (err) {
+      console.error("Signup exception:", err);
+      setError(err instanceof Error ? err.message : "An unexpected error occurred. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    setSuccess(true);
   };
 
   if (success) {

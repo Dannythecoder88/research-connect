@@ -16,7 +16,7 @@ const footerLinks = {
   ],
   company: [
     { href: "/about", label: "About" },
-    { href: "/contact", label: "Contact" },
+    { href: "mailto:daniel.joseph@guilderlandschools.net", label: "Contact" },
     { href: "/privacy", label: "Privacy Policy" },
     { href: "/terms", label: "Terms of Service" },
   ],
@@ -110,7 +110,7 @@ export function Footer() {
           </p>
           <div className="flex items-center gap-3">
             <Link
-              href="mailto:contact@researchconnect.org"
+              href="mailto:daniel.joseph@guilderlandschools.net"
               className="text-muted-foreground hover:text-foreground transition-colors"
             >
               <Mail className="h-4 w-4" />

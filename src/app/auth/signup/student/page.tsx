@@ -60,32 +60,41 @@ export default function StudentSignUpPage() {
     setLoading(true);
     setError("");
 
-    const supabase = createClient();
-    const { error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard/student`,
-        data: {
-          role: "student",
-          first_name: firstName,
-          last_name: lastName,
-          high_school: highSchool,
-          grad_year: gradYear,
-          location,
-          phone,
+    try {
+      const supabase = createClient();
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard/student`,
+          data: {
+            role: "student",
+            first_name: firstName,
+            last_name: lastName,
+            high_school: highSchool,
+            grad_year: gradYear,
+            location,
+            phone,
+          },
         },
-      },
-    });
+      });
 
-    setLoading(false);
+      if (signUpError) {
+        console.error("Supabase signup error:", JSON.stringify(signUpError));
+        const msg = typeof signUpError.message === "string" && signUpError.message.length > 0 && signUpError.message !== "{}"
+          ? signUpError.message
+          : "Registration failed. Please check your details and try again.";
+        setError(msg);
+        return;
+      }
 
-    if (signUpError) {
-      setError(signUpError.message);
-      return;
+      setSuccess(true);
+    } catch (err) {
+      console.error("Signup exception:", err);
+      setError(err instanceof Error ? err.message : "An unexpected error occurred. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    setSuccess(true);
   };
 
   if (success) {
