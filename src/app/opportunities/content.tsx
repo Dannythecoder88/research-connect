@@ -490,11 +490,19 @@ export default function OpportunitiesContent({
                             role="button"
                             tabIndex={0}
                             onClick={() => {
+                              if (!user) {
+                                window.location.href = "/auth/signup";
+                                return;
+                              }
                               setSelectedListing(listing);
                               setMobileDetailOpen(true);
                             }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
+                                if (!user) {
+                                  window.location.href = "/auth/signup";
+                                  return;
+                                }
                                 setSelectedListing(listing);
                                 setMobileDetailOpen(true);
                               }
