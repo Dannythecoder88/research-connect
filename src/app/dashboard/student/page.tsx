@@ -307,7 +307,7 @@ export default function StudentDashboardPage() {
                     <Info className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">Welcome to Research Connect!</p>
+                    <p className="text-sm font-medium">Welcome to CoLab!</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
                       Complete your profile and start exploring research opportunities.
                     </p>

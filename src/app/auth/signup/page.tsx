@@ -13,7 +13,7 @@ export default function SignUpSelectionPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <FlaskConical className="h-5 w-5" />
             </div>
-            <span className="text-lg font-bold tracking-tight">Research Connect</span>
+            <span className="text-lg font-bold tracking-tight">CoLab</span>
           </Link>
           <h1 className="text-2xl sm:text-3xl font-bold mb-2">Create your account</h1>
           <p className="text-muted-foreground">

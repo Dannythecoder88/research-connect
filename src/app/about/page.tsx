@@ -11,7 +11,7 @@ export default function AboutPage() {
     <>
       <Navbar />
       <main className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-12">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">About Research Connect</h1>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">About CoLab</h1>
         <p className="text-lg text-muted-foreground mb-10">
           Bridging the gap between high school students and breakthrough research opportunities.
         </p>
@@ -20,7 +20,7 @@ export default function AboutPage() {
           <section>
             <h2 className="text-lg font-semibold text-foreground mb-3">Our Mission</h2>
             <p>
-              Research Connect was created by the Guilderland Research Club to solve a simple but
+              CoLab was created by the Guilderland Research Club to solve a simple but
               important problem: high school students who are passionate about science often have no
               clear path to real research experience. At the same time, researchers and labs
               frequently struggle to find motivated young people to join their teams.
@@ -64,7 +64,7 @@ export default function AboutPage() {
           <section>
             <h2 className="text-lg font-semibold text-foreground mb-3">The Guilderland Research Club</h2>
             <p>
-              Research Connect originated from the Guilderland Research Club Research Expo. The club
+              CoLab originated from the Guilderland Research Club Research Expo. The club
               is dedicated to fostering a culture of scientific inquiry and research among high
               school students, providing mentorship, resources, and now a digital platform to
               connect with real-world research opportunities.
@@ -75,8 +75,8 @@ export default function AboutPage() {
             <h2 className="text-lg font-semibold text-foreground mb-3">Contact Us</h2>
             <p>
               Have questions, feedback, or want to get involved? Reach out to us at{" "}
-              <a href="mailto:contact@researchconnect.org" className="text-primary hover:underline">
-                contact@researchconnect.org
+              <a href="mailto:daniel.joseph@guilderlandschools.net" className="text-primary hover:underline">
+                daniel.joseph@guilderlandschools.net
               </a>.
             </p>
           </section>

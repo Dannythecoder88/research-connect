@@ -96,8 +96,8 @@ export default function PrivacyPage() {
             <h2 className="text-lg font-semibold text-foreground">9. Contact</h2>
             <p>
               If you have questions about this Privacy Policy, contact us at{" "}
-              <a href="mailto:contact@researchconnect.org" className="text-primary hover:underline">
-                contact@researchconnect.org
+              <a href="mailto:daniel.joseph@guilderlandschools.net" className="text-primary hover:underline">
+                daniel.joseph@guilderlandschools.net
               </a>.
             </p>
           </section>

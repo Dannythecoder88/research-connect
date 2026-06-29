@@ -18,7 +18,7 @@ export function FAQSection() {
             Frequently Asked Questions
           </h2>
           <p className="text-lg text-muted-foreground">
-            Everything you need to know about Research Connect.
+            Everything you need to know about CoLab.
           </p>
         </FadeIn>
 

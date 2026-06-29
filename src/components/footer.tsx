@@ -36,7 +36,7 @@ export function Footer() {
               </div>
               <div className="flex flex-col">
                 <span className="text-lg font-bold leading-tight tracking-tight">
-                  Research Connect
+                  CoLab
                 </span>
                 <span className="text-[10px] leading-none text-muted-foreground">
                   Guilderland Research Club
@@ -105,7 +105,7 @@ export function Footer() {
         {/* Bottom bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border py-6">
           <p className="text-xs text-muted-foreground">
-            &copy; {new Date().getFullYear()} Research Connect. Built by the
+            &copy; {new Date().getFullYear()} CoLab. Built by the
             Guilderland Research Club.
           </p>
           <div className="flex items-center gap-3">

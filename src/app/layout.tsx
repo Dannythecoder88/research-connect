@@ -18,8 +18,8 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Research Connect | Bridge the Gap Between High School and Breakthrough Research",
-    template: "%s | Research Connect",
+    default: "CoLab | Bridge the Gap Between High School and Breakthrough Research",
+    template: "%s | CoLab",
   },
   description:
     "Discover research opportunities, connect with mentors, and gain real-world experience before college. Originated from the Guilderland Research Club Research Expo.",

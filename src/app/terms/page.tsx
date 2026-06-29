@@ -17,8 +17,8 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-foreground">1. Acceptance of Terms</h2>
             <p>
-              By accessing or using Research Connect ("the Platform"), you agree to be bound by these
-              Terms of Service. If you do not agree, do not use the Platform. Research Connect is
+              By accessing or using CoLab ("the Platform"), you agree to be bound by these
+              Terms of Service. If you do not agree, do not use the Platform. CoLab is
               operated by the Guilderland Research Club.
             </p>
           </section>
@@ -57,7 +57,7 @@ export default function TermsPage() {
             <h2 className="text-lg font-semibold text-foreground">5. Researcher Verification</h2>
             <p>
               All researcher and lab accounts are subject to an admin verification process before
-              they can post positions. Research Connect reserves the right to reject or revoke
+              they can post positions. CoLab reserves the right to reject or revoke
               verification at any time.
             </p>
           </section>
@@ -66,7 +66,7 @@ export default function TermsPage() {
             <h2 className="text-lg font-semibold text-foreground">6. Content</h2>
             <p>
               You retain ownership of any content you submit to the Platform (profiles, resumes,
-              applications). By submitting content, you grant Research Connect a non-exclusive,
+              applications). By submitting content, you grant CoLab a non-exclusive,
               royalty-free license to use, display, and distribute your content solely for the
               purpose of operating the Platform.
             </p>
@@ -75,7 +75,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-foreground">7. Disclaimer</h2>
             <p>
-              Research Connect acts as a platform connecting students and researchers. We do not
+              CoLab acts as a platform connecting students and researchers. We do not
               guarantee the quality, safety, or legality of any research position, nor the
               qualifications of any user. Use the Platform at your own risk.
             </p>
@@ -84,7 +84,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-foreground">8. Limitation of Liability</h2>
             <p>
-              To the fullest extent permitted by law, Research Connect and its affiliates shall not
+              To the fullest extent permitted by law, CoLab and its affiliates shall not
               be liable for any indirect, incidental, or consequential damages arising from the use
               of the Platform.
             </p>
@@ -103,8 +103,8 @@ export default function TermsPage() {
             <h2 className="text-lg font-semibold text-foreground">10. Contact</h2>
             <p>
               If you have questions about these Terms, please contact us at{" "}
-              <a href="mailto:contact@researchconnect.org" className="text-primary hover:underline">
-                contact@researchconnect.org
+              <a href="mailto:daniel.joseph@guilderlandschools.net" className="text-primary hover:underline">
+                daniel.joseph@guilderlandschools.net
               </a>.
             </p>
           </section>

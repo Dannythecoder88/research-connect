@@ -100,12 +100,12 @@ export const APPLICATION_STATUSES = [
 
 export const FAQ_ITEMS = [
   {
-    question: "Who can use Research Connect?",
-    answer: "Research Connect is designed for high school students looking for research opportunities, and for professors, labs, startups, and organizations who want to mentor and work with motivated young researchers.",
+    question: "Who can use CoLab?",
+    answer: "CoLab is designed for high school students looking for research opportunities, and for professors, labs, startups, and organizations who want to mentor and work with motivated young researchers.",
   },
   {
     question: "Is there a cost to use the platform?",
-    answer: "Research Connect is completely free for both students and researchers. Our mission is to democratize access to research opportunities for high school students.",
+    answer: "CoLab is completely free for both students and researchers. Our mission is to democratize access to research opportunities for high school students.",
   },
   {
     question: "How do I apply for a research position?",

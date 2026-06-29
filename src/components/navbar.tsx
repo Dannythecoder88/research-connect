@@ -87,7 +87,7 @@ export function Navbar() {
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-bold leading-tight tracking-tight">
-              Research Connect
+              CoLab
             </span>
             <span className="text-[10px] leading-none text-muted-foreground hidden sm:block">
               Guilderland Research Club
